@@ -1,0 +1,10 @@
+.tools/
+**/bin/
+**/obj/
+dist/
+tools/dotnet-install.ps1
+tests/browser-profile-*/
+tests/snapshot-settings/
+tests/launch-settings/
+tests/home-snapshot-settings/
+tests/ui-test-settings/

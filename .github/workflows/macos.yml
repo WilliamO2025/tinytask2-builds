@@ -1,0 +1,35 @@
+name: Build native macOS apps
+on:
+  workflow_dispatch:
+  push:
+    paths: ['macos/**', '.github/workflows/macos.yml']
+permissions:
+  contents: read
+jobs:
+  user-app:
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build universal user app and verify its model
+        env:
+          BUILD_INPUT_LAB: '0'
+        run: bash macos/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TinyTask2-macOS-user
+          path: |
+            dist/macOS/TinyTask 2.0.zip
+            dist/macOS/classic-self-test.json
+  tester-app:
+    runs-on: macos-14
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build both native apps
+        run: bash macos/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TinyTask2-macOS-inputlab
+          path: dist/macOS/TinyTask 2.0 Input Lab.zip

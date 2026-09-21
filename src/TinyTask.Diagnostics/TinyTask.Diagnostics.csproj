@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>TinyTask2</AssemblyName>
+    <Version>0.2.0</Version>
+    <Product>TinyTask 2.0</Product>
+    <Description>Classic macro recorder with experimental input diagnostics</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(InputLab)' == 'true'">
+    <AssemblyName>TinyTask2-InputLab</AssemblyName>
+    <DefineConstants>$(DefineConstants);INPUT_LAB</DefineConstants>
+    <Product>TinyTask 2.0 Input Lab</Product>
+    <Description>Input compatibility diagnostics</Description>
+  </PropertyGroup>
+</Project>
