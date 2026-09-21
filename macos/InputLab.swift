@@ -20,6 +20,8 @@ final class InputLab: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var records: [[String: Any]] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if CommandLine.arguments.contains("--dark") { NSApp.appearance = NSAppearance(named: .darkAqua) }
+        else if CommandLine.arguments.contains("--light") { NSApp.appearance = NSAppearance(named: .aqua) }
         window.title = "TinyTask 2.0 — Input Lab 0.1 (experimental)"
         window.delegate = self
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12

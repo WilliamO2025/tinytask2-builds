@@ -50,6 +50,9 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         do { try engine.enableMonitor() } catch { status.stringValue = "First use: open Preferences → Enable permissions to use recording, playback and hotkeys." }
         if let argument = CommandLine.arguments.firstIndex(of: "--ui-smoke"), CommandLine.arguments.count > argument + 1 {
             let output = CommandLine.arguments[argument + 1]
+            NSApp.appearance = NSAppearance(named: CommandLine.arguments.contains("dark") ? .darkAqua : .aqua)
+            macro = nil; update(); playButton.performClick(nil)
+            guard playButton.isEnabled && status.stringValue == "No recording available. Record or open a macro first." else { exit(1) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 guard let view = self.window.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(1) }
                 view.cacheDisplay(in: view.bounds, to: bitmap)
@@ -82,7 +85,7 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         wasRecording = engine.state == "Recording"; status.stringValue = engine.state
         recordButton.title = wasRecording ? "Finish recording" : "● Record"; recordButton.isEnabled = mode.indexOfSelectedItem == 0 && ["Ready", "Recording"].contains(engine.state)
-        playButton.isEnabled = mode.indexOfSelectedItem == 0 && macro != nil && ["Ready", "Paused"].contains(engine.state)
+        playButton.isEnabled = mode.indexOfSelectedItem == 0 && ["Ready", "Paused"].contains(engine.state)
         pauseButton.title = engine.state == "Paused" ? "Resume" : "Pause"; pauseButton.isEnabled = ["Playing", "Paused"].contains(engine.state)
         openButton.isEnabled = !engine.busy; saveButton.isEnabled = !engine.busy && macro != nil; preferencesButton.isEnabled = !engine.busy; mode.isEnabled = !engine.busy
     }
@@ -93,7 +96,8 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc func playPause() {
         if ["Playing", "Paused"].contains(engine.state) { engine.pauseResume(); return }
-        guard mode.indexOfSelectedItem == 0, let macro else { status.stringValue = "Open or record a macro in Classic mode."; return }
+        guard let macro, !macro.actions.isEmpty else { status.stringValue = "No recording available. Record or open a macro first."; return }
+        guard mode.indexOfSelectedItem == 0 else { status.stringValue = "Switch to Classic to play."; return }
         do { guard let rate = Double(speed.stringValue), let count = Int(loops.stringValue) else { throw MacroError.message("Enter a numeric speed and whole-number loop count.") }; saveSettings(); try engine.play(macro, speed: rate, loops: count, continuous: continuous.state == .on) } catch { status.stringValue = error.localizedDescription }
     }
     @objc func pause() { engine.pauseResume() }
@@ -135,7 +139,8 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func diagnostics() {
         guard !engine.busy else { return }; let adjacent = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("TinyTask 2.0 Input Lab.app"); let installed = URL(fileURLWithPath: "/Applications/TinyTask 2.0 Input Lab.app"); let url = FileManager.default.fileExists(atPath: adjacent.path) ? adjacent : installed
         guard FileManager.default.fileExists(atPath: url.path) else { status.stringValue = "The separate Input Lab app is not installed. Advanced input is experimental."; return }
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { [weak self] _, error in if let error { DispatchQueue.main.async { self?.status.stringValue = error.localizedDescription } } }
+        let configuration = NSWorkspace.OpenConfiguration(); configuration.arguments = [NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? "--dark" : "--light"]
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { [weak self] _, error in if let error { DispatchQueue.main.async { self?.status.stringValue = error.localizedDescription } } }
     }
     func applyAppearance() { NSApp.appearance = defaults.integer(forKey: "theme") == 1 ? NSAppearance(named: .aqua) : defaults.integer(forKey: "theme") == 2 ? NSAppearance(named: .darkAqua) : nil }
     func saveSettings() { defaults.set(speed.stringValue, forKey: "speed"); defaults.set(loops.stringValue, forKey: "loops"); defaults.set(continuous.state == .on, forKey: "continuous") }

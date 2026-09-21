@@ -108,7 +108,7 @@ final class ClassicEngine {
         let now = ProcessInfo.processInfo.systemUptime - recordStart
         if a.type == "move" && now - lastMove < 0.008 { return false }
         if a.type == "move" { lastMove = now }
-        if recording.actions.count >= 99_900 { stop(); failed?("Recording stopped at the action limit. Save it before continuing."); return false }
+        if recording.actions.count >= 99_700 { stop(); failed?("Recording stopped at the action limit. Save it before continuing."); return false }
         a.delay = max(0, now - lastRecord); lastRecord = now; recording.actions.append(a); return false
     }
     func record() throws {
