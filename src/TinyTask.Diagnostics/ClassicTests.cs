@@ -31,6 +31,7 @@ internal static class ClassicTests
             if(Native.GetForegroundWindow()!=target.Handle)throw new Exception("Safe fixture is not focused; macro test not started.");
             var button=new Native.Point(80,80);Native.ClientToScreen(target.Handle,ref button);
             var edit=new Native.Point(80,135);Native.ClientToScreen(target.Handle,ref edit);
+            string expectedText=System.Windows.Forms.Control.IsKeyLocked(System.Windows.Forms.Keys.CapsLock)?"AAA":"aaa";
             engine.Record();
             var actions=new[]{
                 new MacroAction{Type="move",X=button.X,Y=button.Y},
@@ -47,7 +48,7 @@ internal static class ClassicTests
             Check("Recorded timing retained",macro.Actions.Sum(a=>a.Delay)>0.2);
             await engine.Play(macro,1,2,false,0);await Task.Delay(150);
             string title=Native.Title(target.Handle);
-            Check("Recorded macro replays twice with real system input",title.Contains("clicks=3;") && title.Contains("keys=3;") && title.Contains("wheels=3;") && title.Contains("text=aaa"),title);
+            Check("Recorded macro replays twice with real system input",title.Contains("clicks=3;") && title.Contains("keys=3;") && title.Contains("wheels=3;") && title.Contains("text="+expectedText),title);
             var hold=new MacroDocument{Actions=new(){new(){Type="keyDown",Key=0xA0,Scan=0x2A},new(){Type="keyUp",Key=0xA0,Scan=0x2A,Delay=1}}};
             var playing=engine.Play(hold,1,1,false,0);await Task.Delay(50);engine.PauseResume();await Task.Delay(50);
             Check("Pause releases held key",engine.State=="Paused" && (Native.GetAsyncKeyState(0xA0)&0x8000)==0);
