@@ -14,6 +14,8 @@ internal sealed class SetupWizard : Window
     internal Target? Target {get;private set;}
     internal bool Completed {get;private set;}
     internal bool RequestDiagnostics {get;private set;}
+    internal string? MacroMousePath {get;private set;}
+    internal string? UserMousePath {get;private set;}
     private int step;
     private bool second,detected,clicked,hotkey;
     private int normalClicks,virtualClicks;
@@ -30,8 +32,9 @@ internal sealed class SetupWizard : Window
     private nint hwnd;
     private int px=35,py=80;
     private readonly DispatcherTimer render=new(){Interval=TimeSpan.FromMilliseconds(33)};
-    internal SetupWizard(Target? target)
+    internal SetupWizard(Target? target,string? macroPath=null,string? userPath=null,bool directMouse=false,bool testCursor=false)
     {
+        MacroMousePath=macroPath;UserMousePath=userPath;second=directMouse;step=directMouse?2:0;
         Target=target;Title="Set up Advanced Mode";Width=590;Height=575;ResizeMode=ResizeMode.NoResize;WindowStartupLocation=WindowStartupLocation.CenterOwner;
         apps.ItemTemplate=FriendlyTarget.Template();
         FontFamily=new FontFamily("Segoe UI");FontSize=14;Background=new SolidColorBrush(Color.FromRgb(244,246,250));Foreground=Brushes.MidnightBlue;
@@ -47,6 +50,7 @@ internal sealed class SetupWizard : Window
         testButton.Click+=(_,_)=>{normalClicks++;UpdateFeedback();};
         pad.SetResourceReference(BackgroundProperty,"TestSurface");
         Loaded+=(_,_)=>{if(Owner!=null){UiTheme.Inherit(this,Owner);UiTheme.Caption(this,UiTheme.IsDark(Owner));}};
+        Loaded+=(_,_)=>{if(testCursor && macroMouse.SelectedItem is MouseChoice m && userMouse.SelectedItem is MouseChoice u && m.Device.Path==macroPath && u.Device.Path==userPath && m.Device.Handle!=u.Device.Handle){step=3;ShowStep();}};
         ShowStep();
     }
     private void Text(string text)=>body.Children.Add(new TextBlock{Text=text,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,6,0,10)});
@@ -70,10 +74,12 @@ internal sealed class SetupWizard : Window
         if(step==2)
         {
             if(!second){Text("Your normal mouse remains unchanged. Continue to review target compatibility.");return;}
-            var mice=RawInput.Devices().Where(d=>d.Type==0).Select((d,i)=>new MouseChoice(d,$"Mouse {i+1}")).ToList();
-            macroMouse.ItemsSource=mice;userMouse.ItemsSource=mice;macroMouse.SelectedIndex=mice.Count>1?1:0;userMouse.SelectedIndex=0;
+            var mice=RawInput.Devices().Where(d=>d.Type==0).Select((d,i)=>new MouseChoice(d,AdvancedInputSetup.MouseName(d,i))).ToList();
+            macroMouse.ItemsSource=mice;userMouse.ItemsSource=mice;
+            macroMouse.SelectedItem=string.IsNullOrEmpty(MacroMousePath)?mice.ElementAtOrDefault(mice.Count>1?1:0):mice.FirstOrDefault(m=>m.Device.Path==MacroMousePath);
+            userMouse.SelectedItem=string.IsNullOrEmpty(UserMousePath)?mice.FirstOrDefault():mice.FirstOrDefault(m=>m.Device.Path==UserMousePath);
             Text("Use this mouse for TinyTask");body.Children.Add(macroMouse);Text("Use this mouse for me");body.Children.Add(userMouse);
-            Text("These names identify Windows device entries; some may be virtual. The next step verifies which device you move. Assignments apply only to this test.");
+            Text("Move each selected mouse on the next page to identify it. Device choices are saved when you finish. Both physical mice still affect the normal Windows cursor.");
             if(mice.Count<2){Text("Two mouse devices are needed for this test. Connect another mouse, or go back and select your normal mouse.");next.IsEnabled=false;}
         }
         if(step==3)
@@ -83,6 +89,7 @@ internal sealed class SetupWizard : Window
             detected=false;clicked=false;px=35;py=80;pad.Children.Clear();
             BuildTestPad();body.Children.Add(pad);body.Children.Add(observation);UpdateFeedback();
             Text("This blue cursor is a test pointer. Your normal cursor will also move. Ctrl + Alt + F12 stops observation.");
+            var stop=new Button{Content="Disable test cursor"};stop.Click+=(_,_)=>{StopObservation();pointer.Visibility=Visibility.Hidden;observation.Text="Test stopped. Physical controls were never blocked.";};body.Children.Add(stop);pointer.Visibility=Visibility.Visible;
             raw!.Start();render.Start();
         }
         if(step==4)
@@ -102,6 +109,12 @@ internal sealed class SetupWizard : Window
         {
             if(step==0){Target=(apps.SelectedItem as FriendlyTarget)?.Target;if(Target==null)throw new InvalidOperationException("Choose an app first.");Target.Validate();}
             if(step==2 && second && (macroMouse.SelectedItem is not MouseChoice m || userMouse.SelectedItem is not MouseChoice u || m.Device.Handle==u.Device.Handle))throw new InvalidOperationException("Choose a different mouse for each role.");
+            if(step==2 && second)
+            {
+                var chosen=(MouseChoice)macroMouse.SelectedItem;var personal=(MouseChoice)userMouse.SelectedItem;var connected=RawInput.Devices();
+                if(!connected.Any(d=>d.Handle==chosen.Device.Handle && d.Path==chosen.Device.Path) || !connected.Any(d=>d.Handle==personal.Device.Handle && d.Path==personal.Device.Path))throw new InvalidOperationException("A selected mouse disconnected. Go Back and return to refresh the list.");
+                MacroMousePath=chosen.Device.Path;UserMousePath=personal.Device.Path;
+            }
             StopObservation();if(step==4){Completed=true;Close();return;}step++;ShowStep();
         }catch(Exception e){UiTheme.Message(this,e.Message,"Setup");}
     }
@@ -160,5 +173,6 @@ internal sealed class SetupWizard : Window
         Observe(new RawSample((nint)202,0,300,0,0,1,0));if(detected || clicked || px!=35)return false;
         Observe(new RawSample((nint)101,0,270,0,0,1,0));return detected && clicked && px==305;
     }
+    internal bool HasNoSelectedMice=>macroMouse.SelectedItem==null && userMouse.SelectedItem==null;
     private sealed record MouseChoice(Device Device,string Name){public override string ToString()=>Name;}
 }

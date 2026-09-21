@@ -17,6 +17,8 @@ internal sealed class HomePreferences
     public bool MinimizeToTray {get;set;}=true;
     public bool AlwaysOnTop {get;set;}
     public bool SetupSeen {get;set;}
+    public string? MacroMousePath {get;set;}
+    public string? UserMousePath {get;set;}
     public double Speed {get;set;}=1;
     public int Loops {get;set;}=1;
     public bool Continuous {get;set;}
@@ -34,6 +36,7 @@ internal sealed class HomeWindow : Window
     private string? macroJson;
     private readonly string settingsPath=Path.Combine(MainWindow.DataDirectory,"home-settings.json");
     private Target? selectedTarget;
+    private DateTime nextDeviceCheck;
     private readonly ClassicEngine engine=new();
     private HwndSource? source;
     private nint hwnd;
@@ -60,6 +63,10 @@ internal sealed class HomeWindow : Window
         engine.IsControlKey=key=>key==prefs.RecordKey || key==prefs.PlayKey || key==121;
         Get<Button>("Setup").Click+=(_,_)=>Setup();Get<Button>("Compatibility").Click+=(_,_)=>Setup();
         Get<Button>("Settings").Click+=(_,_)=>Settings();
+        Get<Button>("InputSupport").Click+=(_,_)=>AdvancedSupport();
+        Get<Button>("ChooseMouse").Click+=(_,_)=>Setup(true);
+        Get<Button>("TestCursor").Click+=(_,_)=>Setup(true,true);
+        Get<Button>("KeyboardSetup").Click+=(_,_)=>UiTheme.Message(this,"Physical keys follow the foreground app. Raw Input observes their source but cannot give Roblox separate focus. Supported background messages remain target-dependent. No keyboard filtering is enabled; use Diagnostics for a controlled probe.","Keyboard routing - Experimental");
         Get<ComboBox>("Targets").SelectionChanged+=(_,_)=>{selectedTarget=(Get<ComboBox>("Targets").SelectedItem as FriendlyTarget)?.Target;UpdateDetails();};
         Get<Button>("Refresh").Click+=(_,_)=>RefreshTargets();
         tray=new Forms.NotifyIcon {Text="TinyTask 2.0",Icon=System.Drawing.Icon.ExtractAssociatedIcon(AppIdentity.ExecutablePath),Visible=true};
@@ -125,7 +132,7 @@ internal sealed class HomeWindow : Window
         Get<Button>("Play").IsEnabled=classic && engine.State is "Ready" or "Paused";
         Get<Button>("Pause").IsEnabled=engine.State is "Playing" or "Paused";
         Get<Button>("Pause").Content=engine.State=="Paused"?"Resume":"Ⅱ  Pause";
-        foreach(string name in new[]{"Open","Save","Settings","Setup","Compatibility"})Get<Button>(name).IsEnabled=!engine.IsBusy && (name!="Save" || macroJson!=null);
+        foreach(string name in new[]{"Open","Save","Settings","Setup","Compatibility","InputSupport","ChooseMouse","TestCursor","KeyboardSetup"})Get<Button>(name).IsEnabled=!engine.IsBusy && (name!="Save" || macroJson!=null);
     }
     private T Get<T>(string name) where T:FrameworkElement=>(T)view.FindName(name);
     private void Status(string value)=>Get<TextBlock>("Status").Text=value;
@@ -149,13 +156,20 @@ internal sealed class HomeWindow : Window
         nint foreground=Native.GetForegroundWindow();Native.GetWindowThreadProcessId(foreground,out uint pid);
         string name="Desktop";try {using var process=System.Diagnostics.Process.GetProcessById((int)pid);name=FriendlyTarget.Name(process.ProcessName);}catch(ArgumentException){}catch(InvalidOperationException){}catch(System.ComponentModel.Win32Exception){}
         Get<TextBlock>("FocusedApp").Text="Focused app: "+name;
-        Get<TextBlock>("Technical").Text=selectedTarget==null?"No target selected.":$"Window: {selectedTarget.Title}\nHWND: 0x{selectedTarget.Handle:X} · PID: {selectedTarget.Pid}\nInput isolation: not implemented · Virtual HID: not installed by this app";
+        if(Get<ComboBox>("Mode").SelectedIndex==1 && DateTime.UtcNow>=nextDeviceCheck)
+        {
+            nextDeviceCheck=DateTime.UtcNow.AddSeconds(5);
+            try {var mice=RawInput.Devices().Where(d=>d.Type==0).ToList();int index=mice.FindIndex(d=>d.Path==prefs.MacroMousePath);Get<TextBlock>("MouseStatus").Text=string.IsNullOrEmpty(prefs.MacroMousePath)?"Not configured":index<0?"Saved mouse disconnected - choose or reconnect":AdvancedInputSetup.MouseName(mice[index],index)+" (connected; observation only)";}
+            catch{Get<TextBlock>("MouseStatus").Text="Device check failed - open setup to retry";}
+        }
+        Get<TextBlock>("Technical").Text=selectedTarget==null?"No target selected.":$"Window: {selectedTarget.Title}\nHWND: 0x{selectedTarget.Handle:X} · PID: {selectedTarget.Pid}\nInput isolation: experimental, not implemented · Managed driver package: none approved";
     }
-    private void Setup()
+    private void AdvancedSupport(){if(!engine.IsBusy)AdvancedInputSetup.Create(this).ShowDialog();}
+    private void Setup(bool directMouse=false,bool testCursor=false)
     {
         if(engine.IsBusy)return;
-        var wizard=new SetupWizard(selectedTarget){Owner=this};wizard.ShowDialog();
-        if(wizard.Completed){prefs.SetupSeen=true;selectedTarget=wizard.Target;SavePreferences();RefreshTargets();}
+        var wizard=new SetupWizard(selectedTarget,prefs.MacroMousePath,prefs.UserMousePath,directMouse,testCursor){Owner=this};wizard.ShowDialog();
+        if(wizard.Completed){prefs.SetupSeen=true;prefs.MacroMousePath=wizard.MacroMousePath;prefs.UserMousePath=wizard.UserMousePath;nextDeviceCheck=DateTime.MinValue;selectedTarget=wizard.Target;SavePreferences();RefreshTargets();}
         if(wizard.RequestDiagnostics)OpenDiagnostics();
     }
     internal void ConfigureSnapshot(string mode){prefs.SetupSeen=true;prefs.Dark=mode.Contains("dark");Theme(prefs.Dark);if(mode.Contains("advanced"))Get<ComboBox>("Mode").SelectedIndex=1;}
@@ -215,7 +229,9 @@ internal sealed class HomeWindow : Window
         panel.Children.Add(new TextBlock{Text="F10 always stops playback or recording.",Margin=new Thickness(0,12,0,0)});
         var library=new Button{Content="Open saved macros folder",Margin=new Thickness(0,10,0,0)};library.Click+=(_,_)=>{Directory.CreateDirectory(LibraryDirectory);System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(LibraryDirectory){UseShellExecute=true});};panel.Children.Add(library);
         var diagnosticsButton=new Button{Content="Diagnostics",Margin=new Thickness(0,12,0,0)};
-        var advanced=new Expander{Header="Advanced",Margin=new Thickness(0,18,0,0),Content=diagnosticsButton};panel.Children.Add(advanced);
+        var advancedPanel=new StackPanel();
+        var support=new Button{Content="Install Advanced Input Support",Margin=new Thickness(0,8,0,0)};support.Click+=(_,_)=>{window.Close();AdvancedSupport();};advancedPanel.Children.Add(support);advancedPanel.Children.Add(diagnosticsButton);
+        var advanced=new Expander{Header="Advanced",Margin=new Thickness(0,18,0,0),Content=advancedPanel};panel.Children.Add(advanced);
         diagnosticsButton.Click+=(_,_)=>{window.Close();OpenDiagnostics();};UiTheme.Inherit(window,this);return window;
     }
     private void SavePreferences()
@@ -252,7 +268,10 @@ internal sealed class HomeWindow : Window
           <DockPanel><Button x:Name="Setup" DockPanel.Dock="Right" Content="Guided setup"/><TextBlock Text="Your workspace" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/></DockPanel>
           <TextBlock Text="Target app" Margin="0,14,0,6"/><DockPanel><Button x:Name="Refresh" Content="Refresh" DockPanel.Dock="Right"/><ComboBox x:Name="Targets" MinWidth="240"/></DockPanel>
           <TextBlock x:Name="FocusedApp" Text="Focused app: Desktop" Foreground="{DynamicResource Muted}" Margin="0,8,0,12"/>
-          <TextBlock Text="Input isolation: Unavailable"/><TextBlock Text="Second mouse: Not active" Margin="0,6,0,0"/><TextBlock Text="Virtual cursor: Available in guided setup" Margin="0,6,0,0"/><TextBlock Text="User keyboard routing: Unavailable" Margin="0,6,0,10"/>
+          <DockPanel Margin="0,4"><Button x:Name="InputSupport" DockPanel.Dock="Right" Content="Set up"/><StackPanel><TextBlock Text="Input isolation / Advanced Input Support"/><TextBlock Text="Experimental - component setup pending" Foreground="{DynamicResource Muted}"/></StackPanel></DockPanel>
+          <DockPanel Margin="0,4"><Button x:Name="ChooseMouse" DockPanel.Dock="Right" Content="Choose mouse"/><StackPanel><TextBlock Text="Second mouse"/><TextBlock x:Name="MouseStatus" Text="Not configured" Foreground="{DynamicResource Muted}" TextWrapping="Wrap"/></StackPanel></DockPanel>
+          <DockPanel Margin="0,4"><Button x:Name="TestCursor" DockPanel.Dock="Right" Content="Set up / Test"/><StackPanel><TextBlock Text="Virtual cursor"/><TextBlock Text="Ready to test - physical cursor remains shared" Foreground="{DynamicResource Muted}"/></StackPanel></DockPanel>
+          <DockPanel Margin="0,4"><Button x:Name="KeyboardSetup" DockPanel.Dock="Right" Content="Configure"/><StackPanel><TextBlock Text="User keyboard routing"/><TextBlock Text="Experimental - foreground routing only" Foreground="{DynamicResource Muted}"/></StackPanel></DockPanel>
           <Button x:Name="Compatibility" Content="Test compatibility" HorizontalAlignment="Left"/>
           <Expander Header="Show technical details" Margin="0,12,0,0"><TextBlock x:Name="Technical" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="12"/></Expander>
         </StackPanel></Border>
