@@ -21,6 +21,7 @@ jobs:
           path: |
             dist/macOS/TinyTask 2.0.zip
             dist/macOS/classic-self-test.json
+            dist/macOS/user-ui.png
   tester-app:
     runs-on: macos-14
     timeout-minutes: 20

@@ -39,7 +39,7 @@ internal static class ClassicTests
                 new MacroAction{Type="scroll",X=button.X,Y=button.Y,Delta=120},
                 new MacroAction{Type="mouseDown",X=edit.X,Y=edit.Y},new MacroAction{Type="mouseUp",X=edit.X,Y=edit.Y},
                 new MacroAction{Type="keyDown",Key=0x41,Scan=0x1E},new MacroAction{Type="keyUp",Key=0x41,Scan=0x1E}};
-            foreach(var action in actions){if(Native.GetForegroundWindow()!=target.Handle)throw new Exception("Fixture lost focus; test stopped.");ClassicEngine.Send(action);await Task.Delay(40);}
+            foreach(var action in actions){if(Native.GetForegroundWindow()!=target.Handle)throw new Exception("Fixture lost focus; test stopped.");await Task.Run(()=>ClassicEngine.Send(action));await Task.Delay(40);}
             await Task.Delay(600);engine.Stop();var macro=MacroDocument.Parse(JsonSerializer.Serialize(engine.Recording,MacroDocument.Json));
             File.WriteAllText(Path.ChangeExtension(report,"packets.json"),JsonSerializer.Serialize(engine.TestMousePackets,MacroDocument.Json));
             File.WriteAllText(Path.ChangeExtension(report,"recorded.json"),JsonSerializer.Serialize(macro,MacroDocument.Json));

@@ -145,9 +145,9 @@ final class ClassicEngine {
         else if a.type == "keyUp" || a.type == "mouseUp" || a.type == "flags" { held.removeValue(forKey: id(a)) }
     }
     func pauseResume() {
-        if state == "Playing" { pausedAt = ProcessInfo.processInfo.systemUptime; setState("Paused"); release(clear: false) }
+        if state == "Playing" { pausedAt = ProcessInfo.processInfo.systemUptime; timer?.fireDate = .distantFuture; setState("Paused"); release(clear: false) }
         else if state == "Paused" {
-            do { for a in held.values { try send(a) }; started += ProcessInfo.processInfo.systemUptime - pausedAt; setState("Playing") }
+            do { for a in held.values { try send(a) }; started += ProcessInfo.processInfo.systemUptime - pausedAt; timer?.fireDate = Date(); setState("Playing") }
             catch { stop(); failed?(error.localizedDescription) }
         }
     }

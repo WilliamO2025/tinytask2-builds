@@ -48,6 +48,14 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let data = try? Data(contentsOf: recovery), let saved = try? MacroDocument.load(data) { macro = saved; name.stringValue = saved.name; detail.stringValue = "\(saved.actions.count) actions" }
         update(); window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         do { try engine.enableMonitor() } catch { status.stringValue = "First use: open Preferences → Enable permissions to use recording, playback and hotkeys." }
+        if let argument = CommandLine.arguments.firstIndex(of: "--ui-smoke"), CommandLine.arguments.count > argument + 1 {
+            let output = CommandLine.arguments[argument + 1]
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                guard let view = self.window.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(1) }
+                view.cacheDisplay(in: view.bounds, to: bitmap)
+                do { guard let data = bitmap.representation(using: .png, properties: [:]) else { exit(1) }; try data.write(to: URL(fileURLWithPath: output)); NSApp.terminate(nil) } catch { fputs(error.localizedDescription + "\n", stderr); exit(1) }
+            }
+        }
     }
     func button(_ title: String, _ action: Selector) -> NSButton { let b = NSButton(title: title, target: self, action: action); b.bezelStyle = .rounded; b.controlSize = .large; return b }
     func row(_ views: [NSView]) -> NSStackView { let row = NSStackView(views: views); row.spacing = 10; row.alignment = .centerY; return row }

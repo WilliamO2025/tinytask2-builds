@@ -27,6 +27,7 @@ build_app() {
 }
 build_app "TinyTask 2.0" TinyTask2 User-Info.plist "$ROOT/ClassicEngine.swift" "$ROOT/TinyTask.swift"
 "$OUT/TinyTask 2.0.app/Contents/MacOS/TinyTask2" --self-test > "$OUT/classic-self-test.json"
+"$OUT/TinyTask 2.0.app/Contents/MacOS/TinyTask2" --ui-smoke "$OUT/user-ui.png"
 if [[ "${BUILD_INPUT_LAB:-1}" == "1" ]]; then
   build_app "TinyTask 2.0 Input Lab" TinyTaskInputLab Info.plist "$ROOT/InputLab.swift"
 fi
