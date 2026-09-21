@@ -54,8 +54,10 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             macro = nil; update(); playButton.performClick(nil)
             guard playButton.isEnabled && status.stringValue == "No recording available. Record or open a macro first." else { exit(1) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                guard let view = self.window.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(1) }
-                view.cacheDisplay(in: view.bounds, to: bitmap)
+                guard let view = self.window.contentView?.superview, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(1) }
+                view.effectiveAppearance.performAsCurrentDrawingAppearance {
+                    view.layoutSubtreeIfNeeded(); view.displayIfNeeded(); view.cacheDisplay(in: view.bounds, to: bitmap)
+                }
                 do { guard let data = bitmap.representation(using: .png, properties: [:]) else { exit(1) }; try data.write(to: URL(fileURLWithPath: output)); NSApp.terminate(nil) } catch { fputs(error.localizedDescription + "\n", stderr); exit(1) }
             }
         }
