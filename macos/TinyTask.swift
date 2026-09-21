@@ -32,6 +32,7 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         preferencesButton = button("Preferences", #selector(preferences))
         stack.addArrangedSubview(row([title, mode, preferencesButton]))
         openButton = button("Open", #selector(open)); saveButton = button("Save", #selector(save)); recordButton = button("● Record", #selector(record)); playButton = button("▶ Play", #selector(playPause)); pauseButton = button("Pause", #selector(pause)); let stopButton = button("■ Stop", #selector(stop))
+        for control in [openButton!, saveButton!, recordButton!, playButton!, pauseButton!, stopButton] { control.widthAnchor.constraint(equalToConstant: 94).isActive = true }
         stack.addArrangedSubview(row([openButton, saveButton, recordButton, playButton, pauseButton, stopButton]))
         name.font = .systemFont(ofSize: 20, weight: .semibold); stack.addArrangedSubview(name)
         detail.textColor = .secondaryLabelColor; stack.addArrangedSubview(detail)
@@ -86,7 +87,7 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             } catch { DispatchQueue.main.async { [weak self] in self?.status.stringValue = "Recording kept in memory; auto-save failed: " + error.localizedDescription } }
         }
         wasRecording = engine.state == "Recording"; status.stringValue = engine.state
-        recordButton.title = wasRecording ? "Finish recording" : "● Record"; recordButton.isEnabled = mode.indexOfSelectedItem == 0 && ["Ready", "Recording"].contains(engine.state)
+        recordButton.title = wasRecording ? "Finish" : "● Record"; recordButton.isEnabled = mode.indexOfSelectedItem == 0 && ["Ready", "Recording"].contains(engine.state)
         playButton.isEnabled = mode.indexOfSelectedItem == 0 && ["Ready", "Paused"].contains(engine.state)
         pauseButton.title = engine.state == "Paused" ? "Resume" : "Pause"; pauseButton.isEnabled = ["Playing", "Paused"].contains(engine.state)
         openButton.isEnabled = !engine.busy; saveButton.isEnabled = !engine.busy && macro != nil; preferencesButton.isEnabled = !engine.busy; mode.isEnabled = !engine.busy
@@ -156,8 +157,10 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             do {
                 let original = MacroDocument(name: "Round trip", actions: [MacroAction(type: "mouseDown", delay: 0.25, x: 123, y: 456), MacroAction(type: "keyUp", key: 0)])
                 let decoded = try MacroDocument.load(original.data()); guard decoded.actions.count == 2 && decoded.actions[0].delay == 0.25 else { throw MacroError.message("Round-trip failed") }
+                let resume = ClassicEngine.resumeOrder([MacroAction(type: "keyDown", key: 0), MacroAction(type: "flags", key: 56, down: true)])
+                guard resume.first?.key == 56 else { throw MacroError.message("Modifier resume order failed") }
                 var invalid = original; invalid.actions[0].delay = -1; var rejected = false; do { try invalid.validate() } catch { rejected = true }; guard rejected else { throw MacroError.message("Invalid delay accepted") }
-                print("{\"passed\":true,\"checks\":[\"macro round trip\",\"invalid delay rejected\"],\"scope\":\"No physical input or permission test\"}"); return
+                print("{\"passed\":true,\"checks\":[\"macro round trip\",\"invalid delay rejected\",\"modifier resume ordering\"],\"scope\":\"No physical input or permission test\"}"); return
             } catch { fputs(error.localizedDescription + "\n", stderr); exit(1) }
         }
         let app = NSApplication.shared; app.setActivationPolicy(.regular); let delegate = TinyTaskApp(); app.delegate = delegate; app.run(); withExtendedLifetime(delegate) {}

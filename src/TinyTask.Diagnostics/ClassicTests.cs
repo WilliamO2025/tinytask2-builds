@@ -53,6 +53,10 @@ internal static class ClassicTests
             Check("Pause releases held key",engine.State=="Paused" && (Native.GetAsyncKeyState(0xA0)&0x8000)==0);
             await Task.Delay(100);Check("Pause freezes playback",engine.State=="Paused");engine.PauseResume();await Task.Delay(30);engine.Stop();await playing;await Task.Delay(50);
             Check("Stop releases held key",engine.State=="Ready" && (Native.GetAsyncKeyState(0xA0)&0x8000)==0);
+            playing=engine.Play(hold,1,1,false,0);await Task.Delay(50);
+            await Task.Run(()=>{ClassicEngine.Send(new(){Type="keyDown",Key=121,Scan=0x44});ClassicEngine.Send(new(){Type="keyUp",Key=121,Scan=0x44});});
+            await playing.WaitAsync(TimeSpan.FromSeconds(2));await Task.Delay(50);
+            Check("F10 stops while a modifier is held",engine.State=="Ready" && (Native.GetAsyncKeyState(0xA0)&0x8000)==0);
             playing=engine.Play(new(){Actions=new(){new(){Type="delay"}}},100,1,true,0);await Task.Delay(50);engine.Stop();await playing;
             Check("Continuous zero-delay loop is cancellable",engine.State=="Ready");
             bool rejected=false;try{MacroDocument.Parse("{\"actions\":[{\"type\":\"delay\",\"delay\":-1}]}");}catch(ArgumentException){rejected=true;}Check("Invalid delay rejected",rejected);

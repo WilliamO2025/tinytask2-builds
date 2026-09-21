@@ -16,6 +16,8 @@ internal sealed class SetupWizard : Window
     internal bool RequestDiagnostics {get;private set;}
     private int step;
     private bool second,detected,clicked,hotkey;
+    private int normalClicks,virtualClicks;
+    private readonly Button testButton=new(){Width=140,Height=60,Margin=new Thickness(0),Content="Test button",Background=Brushes.RoyalBlue,Foreground=Brushes.White};
     private readonly TextBlock heading=new(){FontSize=23,FontWeight=FontWeights.SemiBold},subtitle=new(){Margin=new Thickness(0,8,0,20),TextWrapping=TextWrapping.Wrap};
     private readonly StackPanel body=new();
     private readonly Button next=new(){Content="Next"},back=new(){Content="Back"};
@@ -41,8 +43,10 @@ internal sealed class SetupWizard : Window
         back.Click+=(_,_)=>{StopObservation();step=Math.Max(0,step-1);ShowStep();};next.Click+=(_,_)=>Next();
         SourceInitialized+=(_,_)=>{hwnd=new WindowInteropHelper(this).Handle;source=HwndSource.FromHwnd(hwnd);source.AddHook(WndProc);raw=new RawInput(hwnd);hotkey=Native.RegisterHotKey(hwnd,14,0x4003,0x7B);};
         Closed+=(_,_)=>{StopObservation();raw?.Dispose();source?.RemoveHook(WndProc);if(hotkey)Native.UnregisterHotKey(hwnd,14);};
-        render.Tick+=(_,_)=>{Canvas.SetLeft(pointer,px);Canvas.SetTop(pointer,py);observation.Text=(detected?"✓ Selected mouse detected":"Move your selected mouse.")+"\n"+(clicked?"✓ Test button clicked with selected mouse":"Click the blue test button with the blue cursor.");};
-        Loaded+=(_,_)=>{if(Owner!=null){Resources=Owner.Resources;Background=Owner.Background;Foreground=Owner.Foreground;}};
+        render.Tick+=(_,_)=>UpdateFeedback();
+        testButton.Click+=(_,_)=>{normalClicks++;UpdateFeedback();};
+        pad.SetResourceReference(BackgroundProperty,"TestSurface");
+        Loaded+=(_,_)=>{if(Owner!=null){UiTheme.Inherit(this,Owner);UiTheme.Caption(this,UiTheme.IsDark(Owner));}};
         ShowStep();
     }
     private void Text(string text)=>body.Children.Add(new TextBlock{Text=text,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,6,0,10)});
@@ -77,8 +81,7 @@ internal sealed class SetupWizard : Window
             if(!second){Text("Second cursor test skipped because you selected your normal mouse.");return;}
             if(!hotkey){Text("The emergency shortcut is in use. Close other diagnostics windows and reopen setup to test the mouse.");return;}
             detected=false;clicked=false;px=35;py=80;pad.Children.Clear();
-            var target=new Border{Width=140,Height=60,Background=Brushes.RoyalBlue,CornerRadius=new CornerRadius(10),Child=new TextBlock{Text="Test button",Foreground=Brushes.White,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center}};
-            Canvas.SetLeft(target,280);Canvas.SetTop(target,50);pad.Children.Add(target);pad.Children.Add(pointer);body.Children.Add(pad);body.Children.Add(observation);
+            BuildTestPad();body.Children.Add(pad);body.Children.Add(observation);UpdateFeedback();
             Text("This blue cursor is a test pointer. Your normal cursor will also move. Ctrl + Alt + F12 stops observation.");
             raw!.Start();render.Start();
         }
@@ -100,7 +103,7 @@ internal sealed class SetupWizard : Window
             if(step==0){Target=(apps.SelectedItem as FriendlyTarget)?.Target;if(Target==null)throw new InvalidOperationException("Choose an app first.");Target.Validate();}
             if(step==2 && second && (macroMouse.SelectedItem is not MouseChoice m || userMouse.SelectedItem is not MouseChoice u || m.Device.Handle==u.Device.Handle))throw new InvalidOperationException("Choose a different mouse for each role.");
             StopObservation();if(step==4){Completed=true;Close();return;}step++;ShowStep();
-        }catch(Exception e){MessageBox.Show(this,e.Message,"Setup");}
+        }catch(Exception e){UiTheme.Message(this,e.Message,"Setup");}
     }
     private nint WndProc(nint window,int message,nint w,nint l,ref bool handled)
     {
@@ -114,11 +117,45 @@ internal sealed class SetupWizard : Window
         detected=true;
         if((sample.Flags&1)==0){px=Math.Clamp(px+sample.X,0,446);py=Math.Clamp(py+sample.Y,0,146);}
         else {px=(int)((long)sample.X*446/65535);py=(int)((long)sample.Y*146/65535);}
-        if((sample.Buttons&1)!=0 && px>=280 && px<=420 && py>=50 && py<=110)clicked=true;
+        if((sample.Buttons&1)!=0 && new Rect(Canvas.GetLeft(testButton),Canvas.GetTop(testButton),testButton.Width,testButton.Height).Contains(new Point(px,py))){clicked=true;virtualClicks++;UpdateFeedback();}
+    }
+    private void BuildTestPad()
+    {
+        pad.Children.Clear();Canvas.SetLeft(testButton,280);Canvas.SetTop(testButton,50);pad.Children.Add(testButton);pad.Children.Add(pointer);
+    }
+    private void UpdateFeedback()
+    {
+        Canvas.SetLeft(pointer,px);Canvas.SetTop(pointer,py);
+        observation.Text=(detected?"Selected mouse detected":"Move your selected mouse.")+ $"\nNormal button clicks: {normalClicks} · Selected cursor presses: {virtualClicks}";
+    }
+    internal async System.Threading.Tasks.Task<bool> TestRepeatedClicks()
+    {
+        heading.Text="4 of 5 · Try the second cursor";
+        BuildTestPad();body.Children.Clear();body.Children.Add(pad);body.Children.Add(observation);
+        for(int i=0;i<12;i++)testButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        UpdateLayout();if(normalClicks!=12 || virtualClicks!=0 || pointer.IsHitTestVisible || testButton.ActualWidth!=140 || testButton.ActualHeight!=60)return false;
+        Topmost=true;Activate();Native.SetForegroundWindow(hwnd);await System.Threading.Tasks.Task.Delay(200);
+        if(Native.GetForegroundWindow()!=hwnd)
+        {
+            Native.GetWindowRect(hwnd,out var bounds);var titlePoint=new Native.Point(bounds.Left+100,bounds.Top+12);
+            if(Native.GetAncestor(Native.WindowFromPoint(titlePoint),2)!=hwnd)throw new InvalidOperationException("Wizard title bar is occluded; test input not sent.");
+            await System.Threading.Tasks.Task.Run(()=>{ClassicEngine.Send(new(){Type="mouseDown",X=titlePoint.X,Y=titlePoint.Y});ClassicEngine.Send(new(){Type="mouseUp",X=titlePoint.X,Y=titlePoint.Y});});
+            await System.Threading.Tasks.Task.Delay(200);
+        }
+        var point=testButton.PointToScreen(new Point(70,30));
+        for(int i=0;i<6;i++)
+        {
+            if(Native.GetForegroundWindow()!=hwnd)throw new InvalidOperationException("Wizard is not focused; test input not sent.");
+            await System.Threading.Tasks.Task.Run(()=>{ClassicEngine.Send(new(){Type="mouseDown",X=(int)point.X,Y=(int)point.Y});ClassicEngine.Send(new(){Type="mouseUp",X=(int)point.X,Y=(int)point.Y});});
+            await System.Threading.Tasks.Task.Delay(100);
+            if(normalClicks!=13+i)return false;
+        }
+        return virtualClicks==0;
     }
     private void StopObservation(){render.Stop();try{raw?.Stop();}catch(Exception e){observation.Text="Could not stop observation: "+e.Message;}}
     internal bool TestDeviceFilter()
     {
+        BuildTestPad();
         macroMouse.Items.Add(new MouseChoice(new Device((nint)101,0,"test-only"),"Test mouse"));macroMouse.SelectedIndex=0;
         Observe(new RawSample((nint)202,0,300,0,0,1,0));if(detected || clicked || px!=35)return false;
         Observe(new RawSample((nint)101,0,270,0,0,1,0));return detected && clicked && px==305;

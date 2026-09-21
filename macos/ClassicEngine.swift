@@ -144,10 +144,17 @@ final class ClassicEngine {
         if a.type == "keyDown" || a.type == "mouseDown" || (a.type == "flags" && a.down && a.key != 57) { held[id(a)] = a }
         else if a.type == "keyUp" || a.type == "mouseUp" || a.type == "flags" { held.removeValue(forKey: id(a)) }
     }
+    static func resumeOrder(_ inputs: [MacroAction]) -> [MacroAction] {
+        func rank(_ action: MacroAction) -> Int {
+            let modifierKeys: [UInt16] = [54,55,56,58,59,60,61,62,63]
+            return action.type == "flags" || (action.type == "keyDown" && modifierKeys.contains(action.key)) ? 0 : action.type == "keyDown" ? 1 : 2
+        }
+        return inputs.sorted { rank($0) != rank($1) ? rank($0) < rank($1) : $0.key != $1.key ? $0.key < $1.key : $0.button < $1.button }
+    }
     func pauseResume() {
         if state == "Playing" { pausedAt = ProcessInfo.processInfo.systemUptime; timer?.fireDate = .distantFuture; setState("Paused"); release(clear: false) }
         else if state == "Paused" {
-            do { for a in held.values { try send(a) }; started += ProcessInfo.processInfo.systemUptime - pausedAt; timer?.fireDate = Date(); setState("Playing") }
+            do { for a in Self.resumeOrder(Array(held.values)) { try send(a) }; started += ProcessInfo.processInfo.systemUptime - pausedAt; timer?.fireDate = Date(); setState("Playing") }
             catch { stop(); failed?(error.localizedDescription) }
         }
     }

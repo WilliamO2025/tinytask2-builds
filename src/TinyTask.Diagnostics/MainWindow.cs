@@ -18,6 +18,7 @@ namespace TinyTask;
 internal sealed class Preferences
 {
     public bool SetupSeen {get;set;}
+    public bool Dark {get;set;}
     public bool MinimizeToTray {get;set;}=true;
     public bool AlwaysOnTop {get;set;}
 }
@@ -52,16 +53,16 @@ internal sealed class MainWindow : Window
     {
         this.hosted=hosted;
         rememberedTarget=initialTarget;
-        Title="TinyTask 2.0 • Input Lab 0.1"; Width=1040; Height=820; MinWidth=850; MinHeight=660;
+        Title="TinyTask 2.0 • Input Lab 0.2"; Width=1040; Height=820; MinWidth=850; MinHeight=660;
         Background=new SolidColorBrush(Color.FromRgb(244,247,251)); FontFamily=new FontFamily("Segoe UI"); FontSize=14;
         try { Directory.CreateDirectory(DataDirectory); if(File.Exists(SettingsPath)) prefs=JsonSerializer.Deserialize<Preferences>(File.ReadAllText(SettingsPath))??new(); } catch(Exception e) { status.Text="Settings could not be loaded: "+e.Message; }
-        Topmost=prefs.AlwaysOnTop;
+        Topmost=prefs.AlwaysOnTop;UiTheme.Apply(this,prefs.Dark);
         var root=new DockPanel {Margin=new Thickness(24)}; Content=root;
         var heading=new StackPanel(); DockPanel.SetDock(heading,Dock.Top); root.Children.Add(heading);
-        heading.Children.Add(new TextBlock {Text="TinyTask 2.0",FontSize=29,FontWeight=FontWeights.Bold,Foreground=new SolidColorBrush(Color.FromRgb(21,57,83))});
-        heading.Children.Add(new TextBlock {Text="INPUT LAB  /  Technical proof of concept",Foreground=Brushes.SlateGray,Margin=new Thickness(0,2,0,14)});
+        heading.Children.Add(new TextBlock {Text="TinyTask 2.0",FontSize=29,FontWeight=FontWeights.Bold});
+        heading.Children.Add(new TextBlock {Text="INPUT LAB  /  Technical proof of concept",Margin=new Thickness(0,2,0,14)});
         heading.Children.Add(new TextBlock {Text="Test background input without moving your system cursor. Physical input is observed, never blocked.",TextWrapping=TextWrapping.Wrap});
-        heading.Children.Add(new TextBlock {Text="Input isolation and OS-independent focus: unavailable. A visual cursor does not change that.",TextWrapping=TextWrapping.Wrap,Foreground=Brushes.DarkGoldenrod,Margin=new Thickness(0,5,0,12)});
+        heading.Children.Add(new TextBlock {Text="Input isolation and OS-independent focus: unavailable. A visual cursor does not change that.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,5,0,12)});
         heading.Children.Add(Row(Button("Refresh windows",RefreshWindows),targets));
         heading.Children.Add(Row(Button("Refresh devices",RefreshDevices),devices));
         heading.Children.Add(Row(Label("Client X"),x,Label("Y"),y,visual,follow));
@@ -71,14 +72,16 @@ internal sealed class MainWindow : Window
         var isolation=new CheckBox {Content="Input Isolation Mode (unsupported by this user-mode prototype)",IsEnabled=false}; heading.Children.Add(Row(isolation));
         var always=new CheckBox {Content="Always on top",IsChecked=prefs.AlwaysOnTop}; always.Click+=(_,_)=>{prefs.AlwaysOnTop=always.IsChecked==true;Topmost=prefs.AlwaysOnTop;SaveSettings();};
         var minimize=new CheckBox {Content="Minimize to tray",IsChecked=prefs.MinimizeToTray}; minimize.Click+=(_,_)=>{prefs.MinimizeToTray=minimize.IsChecked==true;SaveSettings();};
+        var dark=new CheckBox{Content="Dark mode",IsChecked=prefs.Dark};dark.Click+=(_,_)=>{prefs.Dark=dark.IsChecked==true;UiTheme.Apply(this,prefs.Dark);SaveSettings();};
+        if(!hosted)heading.Children.Add(Row(dark));
         heading.Children.Add(Row(always,minimize,Button("Optional components",ShowSetup),Button("Export report",Export)));
         heading.Children.Add(Row(sources)); heading.Children.Add(Row(cursorText));
-        heading.Children.Add(new Border {Background=Brushes.White,Padding=new Thickness(12),Margin=new Thickness(0,8,0,8),Child=status});
-        var footer=new TextBlock {Text="Emergency stop: Ctrl + Alt + F12  •  Close exits completely  •  No drivers installed",Margin=new Thickness(0,8,0,0),Foreground=Brushes.SlateGray};
+        var statusPanel=new Border {Padding=new Thickness(12),Margin=new Thickness(0,8,0,8),Child=status};statusPanel.SetResourceReference(BackgroundProperty,"Surface");heading.Children.Add(statusPanel);
+        var footer=new TextBlock {Text="Emergency stop: Ctrl + Alt + F12  •  Close exits completely  •  No drivers installed",Margin=new Thickness(0,8,0,0)};
         DockPanel.SetDock(footer,Dock.Bottom); root.Children.Add(footer); root.Children.Add(log);
         visual.Click+=(_,_)=>MoveVirtual();
-        SourceInitialized+=(_,_)=>Initialize();
-        Loaded+=(_,_)=> { if(!hosted && !prefs.SetupSeen) ShowSetup(); };
+        SourceInitialized+=(_,_)=>{Initialize();UiTheme.Caption(this,prefs.Dark);};
+        Loaded+=(_,_)=> { if(hosted && Owner!=null){UiTheme.Inherit(this,Owner);UiTheme.Caption(this,UiTheme.IsDark(Owner));} if(!hosted && !prefs.SetupSeen) ShowSetup(); };
         Closed+=(_,_)=>Cleanup();
         StateChanged+=(_,_)=> {if(!hosted && WindowState==WindowState.Minimized && prefs.MinimizeToTray) {Hide(); overlay.Hide();}};
         timer.Tick+=(_,_)=>Tick();
@@ -200,13 +203,13 @@ internal sealed class MainWindow : Window
     private void Export()
     {
         var dialog=new Microsoft.Win32.SaveFileDialog {Filter="JSON report|*.json",FileName="TinyTask-input-report.json"}; if(dialog.ShowDialog(this)!=true)return;
-        var report=new {version="0.1.0",generated=DateTimeOffset.UtcNow,os=Environment.OSVersion.ToString(),session=Process.GetCurrentProcess().SessionId,deviceCount=devices.Items.Count,physicalSuppression=false,independentOsFocus=false,observations};
+        var report=new {version="0.2.0",generated=DateTimeOffset.UtcNow,os=Environment.OSVersion.ToString(),session=Process.GetCurrentProcess().SessionId,deviceCount=devices.Items.Count,physicalSuppression=false,independentOsFocus=false,observations};
         File.WriteAllText(dialog.FileName,JsonSerializer.Serialize(report,new JsonSerializerOptions {WriteIndented=true}));Write("Report exported. It includes target window titles, but no typed test text or physical keystrokes.");
     }
     private void ShowSetup()
     {
         var dialog=new Window {Title="Optional components",Owner=this,Width=620,Height=350,ResizeMode=ResizeMode.NoResize,WindowStartupLocation=WindowStartupLocation.CenterOwner};
-        var panel=new StackPanel {Margin=new Thickness(24)};dialog.Content=panel;
+        UiTheme.Inherit(dialog,this);var panel=new StackPanel {Margin=new Thickness(24)};dialog.Content=panel;
         panel.Children.Add(new TextBlock {Text="Everything needed for Input Lab is included.",FontSize=20,FontWeight=FontWeights.Bold,TextWrapping=TextWrapping.Wrap});
         panel.Children.Add(new TextBlock {Margin=new Thickness(0,15,0,15),TextWrapping=TextWrapping.Wrap,Text="ASTER is an optional, separately licensed multiseat product. It may provide independent workstations on one PC, usually with additional display/input hardware. Roblox compatibility has not been verified. It is not a TinyTask dependency.\n\nThis app will not download drivers, install software, or change your input configuration automatically."});
         panel.Children.Add(Button("Open official ASTER website",()=>Process.Start(new ProcessStartInfo("https://ibiksoft.com/"){UseShellExecute=true})));

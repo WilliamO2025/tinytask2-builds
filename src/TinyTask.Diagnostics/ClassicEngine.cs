@@ -87,7 +87,7 @@ internal sealed class ClassicEngine : IDisposable
         double now=recordClock.Elapsed.TotalSeconds;
         if(action.Type=="move" && now-lastMove<0.008)return;
         if(action.Type=="move")lastMove=now;
-        if(Recording.Actions.Count>=99900){Stop();Failed?.Invoke("Recording stopped at the action limit. Save this macro before continuing.");return;}
+        if(Recording.Actions.Count>=99700){System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(()=>{Stop();Failed?.Invoke("Recording stopped at the action limit. Save this macro before continuing.");});return;}
         action.Delay=Math.Max(0,now-lastRecord);lastRecord=now;Recording.Actions.Add(action);
     }
     private nint MouseHook(int code,nint message,nint data)
@@ -112,10 +112,15 @@ internal sealed class ClassicEngine : IDisposable
     {
         try
         {
-            if(code>=0 && State=="Recording")
+            if(code>=0)
             {
                 var k=Marshal.PtrToStructure<KeyData>(data);
-                if((AcceptInjectedForTest ? k.Extra==Marker : (k.Flags&0x10)==0) && !IsControlKey((int)k.Key) && !OwnWindow(Native.GetForegroundWindow()))
+                if(k.Key==121 && State!="Ready" && ((k.Flags&0x10)==0 || (AcceptInjectedForTest && k.Extra==Marker)))
+                {
+                    if((int)message is 0x100 or 0x104)System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(Stop);
+                    return 1;
+                }
+                if(State=="Recording" && (AcceptInjectedForTest ? k.Extra==Marker : (k.Flags&0x10)==0) && !IsControlKey((int)k.Key) && !OwnWindow(Native.GetForegroundWindow()))
                     Append(new(){Type=((int)message is 0x100 or 0x104)?"keyDown":"keyUp",Key=(int)k.Key,Scan=(int)k.Scan,Extended=(k.Flags&1)!=0});
             }
         }catch(Exception e){Unhook();SetState("Ready");Failed?.Invoke("Recording stopped: "+e.Message);}
@@ -130,6 +135,8 @@ internal sealed class ClassicEngine : IDisposable
         if(macro.Actions.Any(a=>a.Type.StartsWith("key") && IsControlKey(a.Key)))throw new ArgumentException("This macro contains a configured control hotkey. Change the recording/playback hotkeys before replaying it.");
         if(!double.IsFinite(speed) || speed<0.01 || speed>1000 || loops<1 || loops>1000000)throw new ArgumentException("Speed must be 0.01–1000x and loops 1–1,000,000.");
         if(new[]{0x10,0x11,0x12,0x5B,0x5C}.Any(k=>(Native.GetAsyncKeyState(k)&0x8000)!=0))throw new InvalidOperationException("Release modifier keys before playback.");
+        keyboardHook=SetWindowsHookEx(13,keyboardCallback,GetModuleHandle(null),0);
+        if(keyboardHook==0)throw new Win32Exception(Marshal.GetLastWin32Error(),"The modifier-independent F10 stop hook could not be installed.");
         using var cancel=new CancellationTokenSource();playback=cancel;playClock.Restart();SetState("Playing");
         double due=startDelaySeconds;
         try
@@ -152,7 +159,7 @@ internal sealed class ClassicEngine : IDisposable
             }
         }
         catch(OperationCanceledException) when(cancel.IsCancellationRequested){}
-        finally {playClock.Stop();playback=null;ReleaseHeld(true);SetState("Ready");}
+        finally {playClock.Stop();playback=null;ReleaseHeld(true);Unhook();SetState("Ready");}
     }
     private static string HeldId(MacroAction a)=>a.Type.StartsWith("key")?"key:"+a.Key:"mouse:"+a.Button;
     private void Track(MacroAction a){if(a.Type is "keyDown" or "mouseDown")held[HeldId(a)]=a;else if(a.Type is "keyUp" or "mouseUp")held.Remove(HeldId(a));}

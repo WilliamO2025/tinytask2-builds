@@ -69,7 +69,7 @@ internal sealed class HomeWindow : Window
         StateChanged+=(_,_)=>{if(WindowState==WindowState.Minimized && prefs.MinimizeToTray)Hide();UpdateTimer();};
         IsVisibleChanged+=(_,_)=>UpdateTimer();
         focusTimer.Tick+=(_,_)=>UpdateDetails();
-        SourceInitialized+=(_,_)=>{hwnd=new WindowInteropHelper(this).Handle;source=HwndSource.FromHwnd(hwnd);source.AddHook(WndProc);RegisterControls();};
+        SourceInitialized+=(_,_)=>{hwnd=new WindowInteropHelper(this).Handle;source=HwndSource.FromHwnd(hwnd);source.AddHook(WndProc);RegisterControls();UiTheme.Caption(this,prefs.Dark);};
         Loaded+=(_,_)=>{string recovery=Path.Combine(MainWindow.DataDirectory,"last-recording.json");if(File.Exists(recovery))try{LoadDocument(File.ReadAllText(recovery),"Last recording");}catch(Exception e){Status("Recovery could not open: "+e.Message);}};
         Closing+=(_,_)=>StopAll();
         Closed+=(_,_)=>{focusTimer.Stop();engine.Dispose();diagnostics?.Close();SavePreferences();UnregisterControls();source?.RemoveHook(WndProc);tray.Dispose();};
@@ -100,6 +100,8 @@ internal sealed class HomeWindow : Window
             if(engine.State=="Paused"){engine.PauseResume();return;}
             if(engine.IsBusy)return;
             if(Get<ComboBox>("Mode").SelectedIndex!=0)throw new InvalidOperationException("Switch to Classic to play. Background playback is not available.");
+            using var preview=macroJson==null?null:JsonDocument.Parse(macroJson);
+            if(preview==null || preview.RootElement.GetProperty("actions").GetArrayLength()==0){Status("No recording available. Record or open a macro first.");return;}
             if(!hotkeysReady)throw new InvalidOperationException("Playback needs the configured hotkeys and F10 stop to be available.");
             if(macroJson==null)throw new InvalidOperationException("Record or open a macro first.");
             string speedText=Get<ComboBox>("Speed").Text.Trim().TrimEnd('x','X');
@@ -116,11 +118,11 @@ internal sealed class HomeWindow : Window
             try{Directory.CreateDirectory(LibraryDirectory);SaveCopy(Path.Combine(MainWindow.DataDirectory,"last-recording.json"));SaveCopy(Path.Combine(LibraryDirectory,engine.Recording.Name+"-"+DateTime.Now.ToString("fff")+".json"));}catch(Exception e){Dispatcher.BeginInvoke(()=>Status("Recording kept in memory; auto-save failed: "+e.Message));}
         }
         wasRecording=engine.State=="Recording";
-        Status(engine.State);Get<Button>("Record").Content=wasRecording?"Finish recording":"●  Record";
+        Status(engine.State);Get<Button>("Record").Content=wasRecording?"Finish":"●  Record";
         bool classic=Get<ComboBox>("Mode").SelectedIndex==0;
         Get<ComboBox>("Mode").IsEnabled=!engine.IsBusy;
         Get<Button>("Record").IsEnabled=classic && hotkeysReady && engine.State is "Ready" or "Recording";
-        Get<Button>("Play").IsEnabled=classic && hotkeysReady && macroJson!=null && engine.State is "Ready" or "Paused";
+        Get<Button>("Play").IsEnabled=classic && engine.State is "Ready" or "Paused";
         Get<Button>("Pause").IsEnabled=engine.State is "Playing" or "Paused";
         Get<Button>("Pause").Content=engine.State=="Paused"?"Resume":"Ⅱ  Pause";
         foreach(string name in new[]{"Open","Save","Settings","Setup","Compatibility"})Get<Button>(name).IsEnabled=!engine.IsBusy && (name!="Save" || macroJson!=null);
@@ -156,7 +158,7 @@ internal sealed class HomeWindow : Window
         if(wizard.Completed){prefs.SetupSeen=true;selectedTarget=wizard.Target;SavePreferences();RefreshTargets();}
         if(wizard.RequestDiagnostics)OpenDiagnostics();
     }
-    internal void ConfigureSnapshot(string mode){prefs.SetupSeen=true;Theme(mode.Contains("dark"));if(mode.Contains("advanced"))Get<ComboBox>("Mode").SelectedIndex=1;}
+    internal void ConfigureSnapshot(string mode){prefs.SetupSeen=true;prefs.Dark=mode.Contains("dark");Theme(prefs.Dark);if(mode.Contains("advanced"))Get<ComboBox>("Mode").SelectedIndex=1;}
     internal void OpenDiagnostics()
     {
         if(engine.IsBusy)return;
@@ -171,14 +173,14 @@ internal sealed class HomeWindow : Window
         {
             if(new FileInfo(dialog.FileName).Length>MacroDocument.MaxFileBytes)throw new InvalidDataException("Macro files must be smaller than 64 MB.");
             LoadDocument(File.ReadAllText(dialog.FileName),Path.GetFileNameWithoutExtension(dialog.FileName));
-        }catch(Exception e){MessageBox.Show(this,e.Message,"Could not open macro");}
+        }catch(Exception e){UiTheme.Message(this,e.Message,"Could not open macro");}
     }
     internal void LoadDocument(string json,string name)
     {
         if(System.Text.Encoding.UTF8.GetByteCount(json)>MacroDocument.MaxFileBytes)throw new InvalidDataException("Macro files must be smaller than 64 MB.");
         using var parsed=JsonDocument.Parse(json);
         if(parsed.RootElement.ValueKind!=JsonValueKind.Object || !parsed.RootElement.TryGetProperty("actions",out var actions) || actions.ValueKind!=JsonValueKind.Array)throw new InvalidDataException("This file needs an actions list.");
-        macroJson=json;Get<TextBlock>("MacroName").Text=name;Get<TextBlock>("MacroDetail").Text=$"{actions.GetArrayLength()} actions";Get<Button>("Save").IsEnabled=true;Get<Button>("Play").IsEnabled=hotkeysReady && !engine.IsBusy;Status("Ready");
+        macroJson=json;Get<TextBlock>("MacroName").Text=name;Get<TextBlock>("MacroDetail").Text=$"{actions.GetArrayLength()} actions";Get<Button>("Save").IsEnabled=true;Get<Button>("Play").IsEnabled=Get<ComboBox>("Mode").SelectedIndex==0 && engine.State is "Ready" or "Paused";Status("Ready");
     }
     internal void SaveCopy(string path)
     {
@@ -192,15 +194,16 @@ internal sealed class HomeWindow : Window
     {
         if(macroJson==null)return;
         Directory.CreateDirectory(LibraryDirectory);var dialog=new Microsoft.Win32.SaveFileDialog{Filter="Macro JSON (*.json)|*.json",InitialDirectory=LibraryDirectory,FileName=Get<TextBlock>("MacroName").Text+".json"};if(dialog.ShowDialog(this)!=true)return;
-        try {SaveCopy(dialog.FileName);Status("Ready");}catch(Exception e){MessageBox.Show(this,e.Message,"Could not save macro");}
+        try {SaveCopy(dialog.FileName);Status("Ready");}catch(Exception e){UiTheme.Message(this,e.Message,"Could not save macro");}
     }
-    private void Settings()
+    private void Settings()=>CreateSettingsWindow().ShowDialog();
+    internal Window CreateSettingsWindow()
     {
         var window=new Window{Owner=this,Title="Preferences",Width=430,Height=535,ResizeMode=ResizeMode.NoResize,WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=Background,Foreground=Foreground,Resources=Resources};
-        var panel=new StackPanel{Margin=new Thickness(24)};window.Content=panel;
+        var panel=new StackPanel{Margin=new Thickness(24)};window.Content=new ScrollViewer{Content=panel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
         panel.Children.Add(new TextBlock{Text="Make it yours",FontSize=22,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,0,0,16)});
         void Toggle(string label,bool initial,Action<bool> changed){var c=new CheckBox{Content=label,IsChecked=initial,Margin=new Thickness(0,6,0,6)};c.SetResourceReference(ForegroundProperty,"Ink");c.Click+=(_,_)=>changed(c.IsChecked==true);panel.Children.Add(c);}
-        Toggle("Dark mode",prefs.Dark,v=>{prefs.Dark=v;Theme(v);window.Background=Background;window.Foreground=Foreground;SavePreferences();});
+        Toggle("Dark mode",prefs.Dark,v=>{prefs.Dark=v;Theme(v);window.Background=Background;window.Foreground=Foreground;UiTheme.Caption(window,v);SavePreferences();});
         Toggle("Always on top",prefs.AlwaysOnTop,v=>{prefs.AlwaysOnTop=v;Topmost=v;SavePreferences();});
         Toggle("Minimize to tray",prefs.MinimizeToTray,v=>{prefs.MinimizeToTray=v;SavePreferences();});
         void Hotkey(string label,int current,Action<int> change)
@@ -213,7 +216,7 @@ internal sealed class HomeWindow : Window
         var library=new Button{Content="Open saved macros folder",Margin=new Thickness(0,10,0,0)};library.Click+=(_,_)=>{Directory.CreateDirectory(LibraryDirectory);System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(LibraryDirectory){UseShellExecute=true});};panel.Children.Add(library);
         var diagnosticsButton=new Button{Content="Diagnostics",Margin=new Thickness(0,12,0,0)};
         var advanced=new Expander{Header="Advanced",Margin=new Thickness(0,18,0,0),Content=diagnosticsButton};panel.Children.Add(advanced);
-        diagnosticsButton.Click+=(_,_)=>{window.Close();OpenDiagnostics();};window.ShowDialog();
+        diagnosticsButton.Click+=(_,_)=>{window.Close();OpenDiagnostics();};UiTheme.Inherit(window,this);return window;
     }
     private void SavePreferences()
     {
@@ -223,26 +226,13 @@ internal sealed class HomeWindow : Window
         prefs.Continuous=Get<CheckBox>("Continuous").IsChecked==true;
         try{Directory.CreateDirectory(MainWindow.DataDirectory);File.WriteAllText(settingsPath+".tmp",JsonSerializer.Serialize(prefs));File.Move(settingsPath+".tmp",settingsPath,true);}catch(Exception e){Status("Settings not saved: "+e.Message);}
     }
-    internal void Theme(bool dark)
+    internal void Theme(bool dark)=>UiTheme.Apply(this,dark);
+    internal static ResourceDictionary CreateStyles()=>UiTheme.Styles();
+    internal bool TestEmptyPlay()
     {
-        Resources["Canvas"]=new SolidColorBrush((Color)ColorConverter.ConvertFromString(dark?"#151922":"#F4F6FA"));
-        Resources["Surface"]=new SolidColorBrush((Color)ColorConverter.ConvertFromString(dark?"#222836":"#FFFFFF"));
-        Resources["Ink"]=new SolidColorBrush((Color)ColorConverter.ConvertFromString(dark?"#EDF2FA":"#202B3E"));
-        Resources["Muted"]=new SolidColorBrush((Color)ColorConverter.ConvertFromString(dark?"#AFBCD0":"#5D6C83"));
-        Resources["Line"]=new SolidColorBrush((Color)ColorConverter.ConvertFromString(dark?"#394355":"#DCE3EE"));
-        SetResourceReference(BackgroundProperty,"Canvas");SetResourceReference(ForegroundProperty,"Ink");
+        macroJson=null;EngineChanged();Get<Button>("Play").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        return Get<Button>("Play").IsEnabled && Get<TextBlock>("Status").Text=="No recording available. Record or open a macro first.";
     }
-    internal static ResourceDictionary CreateStyles()=>(ResourceDictionary)XamlReader.Parse("""
-    <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-      <Style TargetType="Button"><Setter Property="Padding" Value="14,10"/><Setter Property="Margin" Value="3"/><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="Border" CornerRadius="10" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Border" Property="BorderBrush" Value="#5985EB"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Border" Property="BorderBrush" Value="#5985EB"/><Setter TargetName="Border" Property="BorderThickness" Value="2"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
-      </Style>
-      <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Style>
-      <Style TargetType="CheckBox"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Style>
-      <Style TargetType="TextBox"><Setter Property="Padding" Value="8,5"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/></Style>
-      <Style TargetType="ComboBox"><Setter Property="Padding" Value="8,5"/><Setter Property="MinHeight" Value="32"/></Style>
-    </ResourceDictionary>
-    """);
     private const string Layout="""
     <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Margin="24">
       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
