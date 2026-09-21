@@ -1,0 +1,5 @@
+routines.inc
+*.exe
+*.obj
+*.pdb
+*.ilk

@@ -1,0 +1,122 @@
+--- a/FakerInput/Queue.c
++++ b/FakerInput/Queue.c
+@@ -394,25 +394,33 @@
+ 
+     switch (packet.reportId)
+     {
+-    case REPORTID_CONTROL:
++    case REPORTID_CONTROL: {
+         //
+         // before touching buffer make sure buffer is big enough.
+         //
+-        reportSize = packet.reportBufferLen - sizeof(FakerInputControlReportHeader);
++        if (packet.reportBuffer == NULL ||
++            packet.reportBufferLen < sizeof(FakerInputControlReportHeader) + 1 ||
++            packet.reportBufferLen > CONTROL_REPORT_SIZE) {
++            return STATUS_INVALID_BUFFER_SIZE;
++        }
+         FakerInputControlReportHeader* pReport = (FakerInputControlReportHeader*)packet.reportBuffer;
+-
+-        if (pReport->ReportLength > reportSize)
+-        {
+-            status = STATUS_INVALID_BUFFER_SIZE;
+-            KdPrint(("WriteReport: invalid input buffer. size %d, expect %d\n",
+-                packet.reportBufferLen, reportSize));
+-            return status;
+-        }
+-
+-        //TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "REPORT %d INNER LEN %d FULL LEN %d 0 %d",
+-        //    packet.reportId, pReport->ReportLength, packet.reportBufferLen, pReport->ReportID);
+-
+-        outputReport = (BYTE*)packet.reportBuffer + sizeof(FakerInputControlReportHeader);
++        if (pReport->ReportID != REPORTID_CONTROL || pReport->ReportLength == 0 ||
++            pReport->ReportLength > packet.reportBufferLen - sizeof(*pReport)) {
++            return STATUS_INVALID_BUFFER_SIZE;
++        }
++        outputReport = packet.reportBuffer + sizeof(*pReport);
++        // Wire sizes include report ID; absolute mouse can have one ABI padding byte.
++        switch (outputReport[0]) {
++        case REPORTID_KEYBOARD: reportSize = 9; break;
++        case REPORTID_ENHANCED_KEY: reportSize = 4; break;
++        case REPORTID_RELATIVE_MOUSE: reportSize = 8; break;
++        case REPORTID_ABSOLUTE_MOUSE: reportSize = 7; break;
++        default: return STATUS_INVALID_PARAMETER;
++        }
++        if (pReport->ReportLength != reportSize &&
++            !(outputReport[0] == REPORTID_ABSOLUTE_MOUSE && pReport->ReportLength == 8)) {
++            return STATUS_INVALID_BUFFER_SIZE;
++        }
+ 
+         PVOID pReadReport = NULL;
+ 
+@@ -429,6 +437,10 @@
+             reportSize,
+             &pReadReport,
+             &bytesReturned);
++        if (!NT_SUCCESS(status)) {
++            WdfRequestCompleteWithInformation(reqRead, status, 0);
++            return status;
++        }
+ 
+         RtlCopyMemory(pReadReport,
+             outputReport,
+@@ -437,12 +449,13 @@
+         // Mark from manual queue as complete
+         WdfRequestCompleteWithInformation(reqRead,
+             status,
+-            bytesReturned);
++            reportSize);
+ 
+         // set status and information for initial request
+-        WdfRequestSetInformation(Request, reportSize);
+-
+-        break;
++        WdfRequestSetInformation(Request, packet.reportBufferLen);
++
++        break;
++    }
+     case REPORTID_CHECK_API_VERSION:
+     {
+         FakerInputAPIVersionReport* tempReport =
+@@ -455,6 +468,7 @@
+             return status;
+         }
+ 
++        WdfRequestSetInformation(Request, packet.reportBufferLen);
+         status = STATUS_SUCCESS;
+         break;
+     }
+@@ -497,18 +511,24 @@
+ 
+     switch (packet.reportId)
+     {
+-    case REPORTID_API_VERSION_FEATURE_ID:
++    case REPORTID_API_VERSION_FEATURE_ID: {
+         //TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "IN FEATURE REPORT METHOD");
+         reportSize = sizeof(FakerInputAPIVersionFeature);
+-        FakerInputAPIVersionFeature* tempFeatureReport = (FakerInputAPIVersionFeature*)(packet.reportBuffer);
+-        packet.reportBuffer[0] = REPORTID_API_VERSION_FEATURE_ID;
+-        tempFeatureReport->ApiVersion = FAKERINPUT_API_VERSION;
++        if (packet.reportBuffer == NULL || packet.reportBufferLen < reportSize) {
++            return STATUS_INVALID_BUFFER_SIZE;
++        }
++        FakerInputAPIVersionFeature versionFeature = {0};
++        RtlZeroMemory(&versionFeature, sizeof(versionFeature));
++        versionFeature.ReportId = REPORTID_API_VERSION_FEATURE_ID;
++        versionFeature.ApiVersion = FAKERINPUT_API_VERSION;
++        RtlCopyMemory(packet.reportBuffer, &versionFeature, reportSize);
+ 
+         //
+         // Report how many bytes were copied
+         //
+         WdfRequestSetInformation(Request, reportSize);
+         break;
++    }
+     default:
+         status = STATUS_INVALID_PARAMETER;
+         break;
+@@ -686,4 +706,4 @@
+ 
+     status = RequestCopyFromBuffer(Request, string, stringSizeCb);
+     return status;
+-}+}
