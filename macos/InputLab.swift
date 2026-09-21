@@ -22,7 +22,7 @@ final class InputLab: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         if CommandLine.arguments.contains("--dark") { NSApp.appearance = NSAppearance(named: .darkAqua) }
         else if CommandLine.arguments.contains("--light") { NSApp.appearance = NSAppearance(named: .aqua) }
-        window.title = "TinyTask 2.0 — Input Lab 0.1 (experimental)"
+        window.title = "TinyTask 2.0 — Input Lab 0.2 (experimental)"
         window.delegate = self
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -113,7 +113,7 @@ final class InputLab: NSObject, NSApplicationDelegate, NSWindowDelegate {
         task = item; DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: item)
     }
     @objc func stop() { task?.cancel(); task = nil; timer?.invalidate(); timer = nil; cursor.orderOut(nil); if let hid { IOHIDManagerUnscheduleFromRunLoop(hid, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue); IOHIDManagerClose(hid, IOOptionBits(kIOHIDOptionsTypeNone)) }; hid = nil; status.stringValue = "Stopped. No device was seized or blocked." }
-    @objc func exportReport() { let save = NSSavePanel(); save.nameFieldStringValue = "TinyTask-mac-input-report.json"; if save.runModal() == .OK, let url = save.url { do { let data = try JSONSerialization.data(withJSONObject: ["version": "0.1.0", "platform": "macOS", "physicalSuppression": false, "observations": records], options: [.prettyPrinted, .sortedKeys]); try data.write(to: url, options: .atomic) } catch { status.stringValue = error.localizedDescription } } }
+    @objc func exportReport() { let save = NSSavePanel(); save.nameFieldStringValue = "TinyTask-mac-input-report.json"; if save.runModal() == .OK, let url = save.url { do { let data = try JSONSerialization.data(withJSONObject: ["version": "0.2.0", "platform": "macOS", "physicalSuppression": false, "observations": records], options: [.prettyPrinted, .sortedKeys]); try data.write(to: url, options: .atomic) } catch { status.stringValue = error.localizedDescription } } }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationWillTerminate(_ notification: Notification) { stop(); if let localMonitor { NSEvent.removeMonitor(localMonitor) }; if let globalMonitor { NSEvent.removeMonitor(globalMonitor) } }
 }
