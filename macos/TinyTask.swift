@@ -129,8 +129,9 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     // Permission dialogs are asynchronous. Never start recording/playback as a
     // side effect of approval; the user explicitly clicks the action again.
+    var inputAccessGranted: Bool { AXIsProcessTrusted() && CGPreflightListenEventAccess() && CGPreflightPostEventAccess() }
     func refreshPermissions() -> Bool {
-        guard AXIsProcessTrusted(), CGPreflightListenEventAccess(), CGPreflightPostEventAccess() else {
+        guard inputAccessGranted else {
             status.stringValue = "Permission needed. Click Record, Play, or Enable permissions to request access."
             return false
         }
@@ -155,7 +156,7 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if !CGPreflightListenEventAccess() { _ = CGRequestListenEventAccess() }
         if !CGPreflightPostEventAccess() { _ = CGRequestPostEventAccess() }
-        if !refreshPermissions() {
+        if !refreshPermissions() && !inputAccessGranted {
             status.stringValue = "Approve macOS's access requests. If macOS opens System Settings, enable TinyTask 2.0 there, then return. A restart may be required."
         }
     }
