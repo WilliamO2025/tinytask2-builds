@@ -17,6 +17,7 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var statusItem: NSStatusItem!
     var macro: MacroDocument?
     var wasRecording = false
+    var permissionsPending = false
     let defaults = UserDefaults.standard
     var library: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("TinyTask2/Macros", isDirectory: true) }
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -48,7 +49,11 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let recovery = library.deletingLastPathComponent().appendingPathComponent("last-recording.json")
         if let data = try? Data(contentsOf: recovery), let saved = try? MacroDocument.load(data) { macro = saved; name.stringValue = saved.name; detail.stringValue = "\(saved.actions.count) actions" }
         update(); window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
-        do { try engine.enableMonitor() } catch { status.stringValue = "First use: open Preferences → Enable permissions to use recording, playback and hotkeys." }
+        if !CommandLine.arguments.contains("--ui-smoke") {
+            if !refreshPermissions() && !defaults.bool(forKey: "permissionRequestShown") {
+                DispatchQueue.main.async { [weak self] in self?.permissions() }
+            }
+        }
         if let argument = CommandLine.arguments.firstIndex(of: "--ui-smoke"), CommandLine.arguments.count > argument + 1 {
             let output = CommandLine.arguments[argument + 1]
             NSApp.appearance = NSAppearance(named: CommandLine.arguments.contains("dark") ? .darkAqua : .aqua)
@@ -95,12 +100,14 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func record() {
         if engine.state == "Recording" { engine.stop(); return }
         guard mode.indexOfSelectedItem == 0 else { status.stringValue = "Switch to Classic to record."; return }
+        guard prepareInput() else { return }
         do { try engine.record() } catch { status.stringValue = error.localizedDescription }
     }
     @objc func playPause() {
         if ["Playing", "Paused"].contains(engine.state) { engine.pauseResume(); return }
         guard let macro, !macro.actions.isEmpty else { status.stringValue = "No recording available. Record or open a macro first."; return }
         guard mode.indexOfSelectedItem == 0 else { status.stringValue = "Switch to Classic to play."; return }
+        guard prepareInput() else { return }
         do { guard let rate = Double(speed.stringValue), let count = Int(loops.stringValue) else { throw MacroError.message("Enter a numeric speed and whole-number loop count.") }; saveSettings(); try engine.play(macro, speed: rate, loops: count, continuous: continuous.state == .on) } catch { status.stringValue = error.localizedDescription }
     }
     @objc func pause() { engine.pauseResume() }
@@ -120,9 +127,37 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard result == .OK, let url = panel.url else { return }; do { macro.name = url.deletingPathExtension().lastPathComponent; try macro.data().write(to: url, options: .atomic); self?.macro = macro; self?.name.stringValue = macro.name } catch { self?.status.stringValue = error.localizedDescription }
         }
     }
+    // Permission dialogs are asynchronous. Never start recording/playback as a
+    // side effect of approval; the user explicitly clicks the action again.
+    func refreshPermissions() -> Bool {
+        guard AXIsProcessTrusted(), CGPreflightListenEventAccess(), CGPreflightPostEventAccess() else {
+            status.stringValue = "Permission needed. Click Record, Play, or Enable permissions to request access."
+            return false
+        }
+        do {
+            try engine.enableMonitor(); permissionsPending = false
+            status.stringValue = "Permissions ready. Click Record or Play to begin."
+            return true
+        } catch { status.stringValue = error.localizedDescription; return false }
+    }
+    func prepareInput() -> Bool {
+        if refreshPermissions() { return true }
+        permissions(); return false
+    }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        if permissionsPending && !engine.busy { _ = refreshPermissions() }
+    }
     @objc func permissions() {
-        _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary); _ = CGRequestListenEventAccess(); _ = CGRequestPostEventAccess()
-        do { try engine.enableMonitor(); status.stringValue = "Permissions ready. F8 records, F9 plays/pauses, F10 stops (or your chosen keys)." } catch { status.stringValue = error.localizedDescription }
+        guard !engine.busy else { return }
+        permissionsPending = true; defaults.set(true, forKey: "permissionRequestShown")
+        if !AXIsProcessTrusted() {
+            _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
+        }
+        if !CGPreflightListenEventAccess() { _ = CGRequestListenEventAccess() }
+        if !CGPreflightPostEventAccess() { _ = CGRequestPostEventAccess() }
+        if !refreshPermissions() {
+            status.stringValue = "Approve macOS's access requests. If macOS opens System Settings, enable TinyTask 2.0 there, then return. A restart may be required."
+        }
     }
     @objc func preferences() {
         guard !engine.busy else { return }
