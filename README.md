@@ -4,17 +4,17 @@ A compact Classic macro recorder for Windows and macOS, with a separate experime
 
 ## Downloads
 
-[Download v0.2.0-rc1 from GitHub Releases](https://github.com/WilliamO2025/tinytask2-builds/releases/tag/v0.2.0-rc1).
+[Download v0.2.0-rc2 from GitHub Releases](https://github.com/WilliamO2025/tinytask2-builds/releases/tag/v0.2.0-rc2).
 
-- [Windows installer](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc1/TinyTask2-Windows.Setup.exe)
-- [Windows portable app](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc1/TinyTask2-Windows.exe)
-- [TinyTask 2.0 for macOS](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc1/TinyTask2-macOS.zip)
-- [Windows Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc1/TinyTask2-Windows-InputLab.exe)
-- [macOS Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc1/TinyTask2-macOS-InputLab.zip)
+- [Windows installer](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc2/TinyTask2-Windows.Setup.exe)
+- [Windows portable app](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc2/TinyTask2-Windows.exe)
+- [TinyTask 2.0 for macOS](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc2/TinyTask2-macOS.zip)
+- [Windows Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc2/TinyTask2-Windows-InputLab.exe)
+- [macOS Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc2/TinyTask2-macOS-InputLab.zip)
 
 Windows: run the installer for Start Menu and desktop shortcuts, or open the portable EXE. The runtime is included. Builds are unsigned and may trigger SmartScreen.
 
-Mac: unzip on your Mac, move TinyTask 2.0.app to Applications, open it, and grant Accessibility/Input Monitoring permissions. Requires macOS 13+, Intel or Apple Silicon. No developer tools are needed. The app is ad-hoc signed, not Developer ID signed or notarized; Gatekeeper may require [Open Anyway](https://support.apple.com/102445). Physical Mac input acceptance testing remains outstanding.
+Mac: unzip on your Mac, move TinyTask 2.0.app to Applications, open it, and approve the native Accessibility/Input Monitoring requests. macOS may still require a Settings toggle. Requires macOS 13+, Intel or Apple Silicon. No developer tools are needed. The app is ad-hoc signed, not Developer ID signed or notarized; Gatekeeper may require [Open Anyway](https://support.apple.com/102445). Physical Mac input acceptance testing remains outstanding.
 
 ## Classic Mode
 
