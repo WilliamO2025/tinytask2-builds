@@ -19,6 +19,8 @@ internal sealed class HomePreferences
     public bool SetupSeen {get;set;}
     public string? MacroMousePath {get;set;}
     public string? UserMousePath {get;set;}
+    public bool MatchWindowsPointer {get;set;}=true;
+    public double CursorSensitivity {get;set;}=1;
     public double Speed {get;set;}=1;
     public int Loops {get;set;}=1;
     public bool Continuous {get;set;}
@@ -168,8 +170,8 @@ internal sealed class HomeWindow : Window
     private void Setup(bool directMouse=false,bool testCursor=false)
     {
         if(engine.IsBusy)return;
-        var wizard=new SetupWizard(selectedTarget,prefs.MacroMousePath,prefs.UserMousePath,directMouse,testCursor){Owner=this};wizard.ShowDialog();
-        if(wizard.Completed){prefs.SetupSeen=true;prefs.MacroMousePath=wizard.MacroMousePath;prefs.UserMousePath=wizard.UserMousePath;nextDeviceCheck=DateTime.MinValue;selectedTarget=wizard.Target;SavePreferences();RefreshTargets();}
+        var wizard=new SetupWizard(selectedTarget,prefs.MacroMousePath,prefs.UserMousePath,directMouse,testCursor,prefs.MatchWindowsPointer,prefs.CursorSensitivity){Owner=this};wizard.ShowDialog();
+        if(wizard.Completed){prefs.SetupSeen=true;prefs.MacroMousePath=wizard.MacroMousePath;prefs.UserMousePath=wizard.UserMousePath;prefs.MatchWindowsPointer=wizard.MatchWindowsPointer;prefs.CursorSensitivity=wizard.CursorSensitivity;nextDeviceCheck=DateTime.MinValue;selectedTarget=wizard.Target;SavePreferences();RefreshTargets();}
         if(wizard.RequestDiagnostics)OpenDiagnostics();
     }
     internal void ConfigureSnapshot(string mode){prefs.SetupSeen=true;prefs.Dark=mode.Contains("dark");Theme(prefs.Dark);if(mode.Contains("advanced"))Get<ComboBox>("Mode").SelectedIndex=1;}

@@ -16,6 +16,8 @@ internal sealed class SetupWizard : Window
     internal bool RequestDiagnostics {get;private set;}
     internal string? MacroMousePath {get;private set;}
     internal string? UserMousePath {get;private set;}
+    internal bool MatchWindowsPointer {get;private set;}
+    internal double CursorSensitivity {get;private set;}
     private int step;
     private bool second,detected,clicked,hotkey;
     private int normalClicks,virtualClicks;
@@ -30,10 +32,11 @@ internal sealed class SetupWizard : Window
     private RawInput? raw;
     private HwndSource? source;
     private nint hwnd;
-    private int px=35,py=80;
+    private double px=35,py=80;
     private readonly DispatcherTimer render=new(){Interval=TimeSpan.FromMilliseconds(33)};
-    internal SetupWizard(Target? target,string? macroPath=null,string? userPath=null,bool directMouse=false,bool testCursor=false)
+    internal SetupWizard(Target? target,string? macroPath=null,string? userPath=null,bool directMouse=false,bool testCursor=false,bool matchWindowsPointer=true,double cursorSensitivity=1)
     {
+        MatchWindowsPointer=matchWindowsPointer;CursorSensitivity=double.IsFinite(cursorSensitivity)?Math.Clamp(cursorSensitivity,0.1,4):1;
         MacroMousePath=macroPath;UserMousePath=userPath;second=directMouse;step=directMouse?2:0;
         Target=target;Title="Set up Advanced Mode";Width=590;Height=575;ResizeMode=ResizeMode.NoResize;WindowStartupLocation=WindowStartupLocation.CenterOwner;
         apps.ItemTemplate=FriendlyTarget.Template();
@@ -88,6 +91,12 @@ internal sealed class SetupWizard : Window
             if(!hotkey){Text("The emergency shortcut is in use. Close other diagnostics windows and reopen setup to test the mouse.");return;}
             detected=false;clicked=false;px=35;py=80;pad.Children.Clear();
             BuildTestPad();body.Children.Add(pad);body.Children.Add(observation);UpdateFeedback();
+            var match=new CheckBox{Content="Match Windows pointer (accounts for DPI and pointer speed)",IsChecked=MatchWindowsPointer,Margin=new Thickness(0,8,0,8)};
+            var speed=new Slider{Minimum=0.1,Maximum=4,Value=CursorSensitivity,Width=300,HorizontalAlignment=HorizontalAlignment.Left,IsEnabled=!MatchWindowsPointer};
+            var speedText=new TextBlock{Text=$"Independent cursor speed: {CursorSensitivity:0.00}x"};
+            match.Checked+=(_,_)=>{MatchWindowsPointer=true;speed.IsEnabled=false;};match.Unchecked+=(_,_)=>{MatchWindowsPointer=false;speed.IsEnabled=true;};
+            speed.ValueChanged+=(_,_)=>{CursorSensitivity=speed.Value;speedText.Text=$"Independent cursor speed: {CursorSensitivity:0.00}x";};
+            body.Children.Add(match);body.Children.Add(speedText);body.Children.Add(speed);
             Text("This blue cursor is a test pointer. Your normal cursor will also move. Ctrl + Alt + F12 stops observation.");
             var stop=new Button{Content="Disable test cursor"};stop.Click+=(_,_)=>{StopObservation();pointer.Visibility=Visibility.Hidden;observation.Text="Test stopped. Physical controls were never blocked.";};body.Children.Add(stop);pointer.Visibility=Visibility.Visible;
             raw!.Start();render.Start();
@@ -128,8 +137,14 @@ internal sealed class SetupWizard : Window
     {
         if(macroMouse.SelectedItem is not MouseChoice mouse || sample.Device!=mouse.Device.Handle)return;
         detected=true;
-        if((sample.Flags&1)==0){px=Math.Clamp(px+sample.X,0,446);py=Math.Clamp(py+sample.Y,0,146);}
-        else {px=(int)((long)sample.X*446/65535);py=(int)((long)sample.Y*146/65535);}
+        if(MatchWindowsPointer && Native.GetCursorPos(out var system))
+        {
+            // PointFromScreen converts physical screen pixels into WPF device-independent units.
+            // Sample only on the assigned device's packets; do not pretend this suppresses either mouse.
+            var point=pad.PointFromScreen(new Point(system.X,system.Y));px=point.X;py=point.Y;
+        }
+        else if((sample.Flags&1)==0){px=Math.Clamp(px+sample.X*CursorSensitivity,0,460);py=Math.Clamp(py+sample.Y*CursorSensitivity,0,160);}
+        else {px=(double)sample.X*460/65535;py=(double)sample.Y*160/65535;}
         if((sample.Buttons&1)!=0 && new Rect(Canvas.GetLeft(testButton),Canvas.GetTop(testButton),testButton.Width,testButton.Height).Contains(new Point(px,py))){clicked=true;virtualClicks++;UpdateFeedback();}
     }
     private void BuildTestPad()
@@ -138,7 +153,7 @@ internal sealed class SetupWizard : Window
     }
     private void UpdateFeedback()
     {
-        Canvas.SetLeft(pointer,px);Canvas.SetTop(pointer,py);
+        Canvas.SetLeft(pointer,px-pointer.Width/2);Canvas.SetTop(pointer,py-pointer.Height/2);
         observation.Text=(detected?"Selected mouse detected":"Move your selected mouse.")+ $"\nNormal button clicks: {normalClicks} · Selected cursor presses: {virtualClicks}";
     }
     internal async System.Threading.Tasks.Task<bool> TestRepeatedClicks()
@@ -168,11 +183,24 @@ internal sealed class SetupWizard : Window
     private void StopObservation(){render.Stop();try{raw?.Stop();}catch(Exception e){observation.Text="Could not stop observation: "+e.Message;}}
     internal bool TestDeviceFilter()
     {
+        MatchWindowsPointer=false;CursorSensitivity=1;px=35;py=80;
         BuildTestPad();
         macroMouse.Items.Add(new MouseChoice(new Device((nint)101,0,"test-only"),"Test mouse"));macroMouse.SelectedIndex=0;
         Observe(new RawSample((nint)202,0,300,0,0,1,0));if(detected || clicked || px!=35)return false;
         Observe(new RawSample((nint)101,0,270,0,0,1,0));return detected && clicked && px==305;
     }
+    internal bool TestCursorScaling()
+    {
+        MatchWindowsPointer=false;CursorSensitivity=0.25;px=35;py=80;
+        for(int i=0;i<4;i++)Observe(new RawSample((nint)101,0,1,0,0,0,0));
+        if(px!=36)return false;
+        MatchWindowsPointer=true;
+        if(!Native.GetCursorPos(out var system))return false;
+        var expected=pad.PointFromScreen(new Point(system.X,system.Y));
+        Observe(new RawSample((nint)101,0,999,999,0,0,0));
+        return px==expected.X && py==expected.Y;
+    }
     internal bool HasNoSelectedMice=>macroMouse.SelectedItem==null && userMouse.SelectedItem==null;
+    internal void ShowCursorSettingsForTest(){second=true;step=3;ShowStep();}
     private sealed record MouseChoice(Device Device,string Name){public override string ToString()=>Name;}
 }
