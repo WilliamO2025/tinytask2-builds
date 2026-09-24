@@ -1,4 +1,4 @@
-param([switch]$Test)
+param([switch]$Test,[switch]$Preview)
 $ErrorActionPreference='Stop'
 $root=Resolve-Path (Join-Path $PSScriptRoot '../..')
 $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
@@ -6,6 +6,7 @@ $installation=& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.
 if(!$installation){throw 'MSVC x64 build tools are required for this maintainer build'}
 $vcvars=Join-Path $installation 'VC/Auxiliary/Build/vcvars64.bat'
 $out=Join-Path $root 'dist/route-probe'
+if($Preview){$out=Join-Path $root 'dist/route-roblox-probe'}
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 Push-Location $PSScriptRoot
 try {

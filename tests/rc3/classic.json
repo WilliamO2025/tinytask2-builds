@@ -1,0 +1,51 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "name": "Low-level hook records movement/buttons/scroll/keyboard",
+      "passed": true,
+      "evidence": "move,mouseDown,move,mouseUp,keyDown,keyUp,move,scroll,move,mouseDown,move,mouseUp,keyDown,keyUp,delay"
+    },
+    {
+      "name": "Recorded timing retained",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "name": "Recorded macro replays twice with real system input",
+      "passed": true,
+      "evidence": "TinyTask fixture work | clicks=3;keys=3;wheels=3;text=aaa"
+    },
+    {
+      "name": "Pause releases held key",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "name": "Pause freezes playback",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "name": "Stop releases held key",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "name": "F10 stops while a modifier is held",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "name": "Continuous zero-delay loop is cancellable",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "name": "Invalid delay rejected",
+      "passed": true,
+      "evidence": ""
+    }
+  ],
+  "scope": "Windows Classic with a controlled native fixture. Synthetic input explicitly allowed for recording test only; physical-device recording and macOS require separate acceptance tests."
+}

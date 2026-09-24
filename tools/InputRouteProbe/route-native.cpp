@@ -5,8 +5,13 @@
 #include <string>
 #include <algorithm>
 
-// Bounded, owned-window experiment. Never targets Roblox or another application.
+// Bounded experiment. Roblox guard observes physical routing only; injects no input.
 static HWND target=nullptr,work=nullptr,previous=nullptr;
+static HWND roblox=nullptr;
+static DWORD robloxPid=0;
+static bool robloxGuard=false;
+static int routedMoves=0,cursorChanges=0;
+static POINT pinnedCursor{};
 static HWND controller=nullptr;
 static HANDLE observer=nullptr;
 static DWORD observerThread=0;
@@ -21,10 +26,22 @@ static POINT saved{},virtualPoint{180,160};
 static int macroKeys=0,macroClicks=0,legacyA=0,rawA=0,rawMouse=0,workKeys=0,workClicks=0,hookKeys=0;
 static int baseA=0,baseRawA=0,baseRawMouse=0,baseClicks=0,beats=0;
 static bool automatic=false,sentControl=false,startedRouting=false;
+static int physicalKeys=0,physicalClicks=0;
+static DWORD stopCode=0;
 static std::wstring report;
 static std::wstring status=L"Click Start. Use only A and the left mouse button. F10 stops.";
 static constexpr ULONG_PTR macroTag=0x54543201,controlTag=0x54543202;
-static bool active(){return running.load() && GetTickCount64()-began<20000 && GetForegroundWindow()==target;}
+static HWND focusTarget(){return robloxGuard?roblox:target;}
+static bool validRoblox(HWND hwnd){
+    DWORD pid=0;GetWindowThreadProcessId(hwnd,&pid);
+    HANDLE process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
+    if(!process)return false;
+    wchar_t path[32768]{};DWORD size=32768;
+    bool valid=QueryFullProcessImageNameW(process,0,path,&size)!=FALSE;CloseHandle(process);
+    const wchar_t* name=wcsrchr(path,L'\\');
+    return valid && name && _wcsicmp(name+1,L"RobloxPlayerBeta.exe")==0 && IsWindowVisible(hwnd) && !IsIconic(hwnd) && GetAncestor(hwnd,GA_ROOT)==hwnd;
+}
+static bool active(){return running.load() && GetTickCount64()-began<20000 && GetForegroundWindow()==focusTarget();}
 static void release(){
     running=false;
     if(auto h=mouseHook.exchange(nullptr))if(!UnhookWindowsHookEx(h))++unhookFailures;
@@ -36,32 +53,45 @@ static void stop(const wchar_t* reason){
     release();KillTimer(target,1);
     if(watchdog){DeleteTimerQueueTimer(nullptr,watchdog,INVALID_HANDLE_VALUE);watchdog=nullptr;}
     status=reason;
+    const auto elapsed=GetTickCount64()-began;
+    const bool completed=startedRouting && elapsed>=20000 && stopCode==0;
+    const bool physicalPassed=!robloxGuard && !automatic && completed && baseRawA>0 && baseRawMouse>0 && physicalKeys>0 && physicalClicks>0 && workKeys>0 && workClicks>0 && macroKeys>0 && macroClicks>baseClicks && legacyA==baseA && rawA==baseRawA && rawMouse==baseRawMouse;
     bool passed=sentControl && workKeys>=1 && workClicks>=1 && legacyA==baseA && macroKeys>0 && macroClicks>baseClicks;
     FILE* file=nullptr;
+    bool reportWritten=false;
     if(_wfopen_s(&file,report.c_str(),L"w")==0){
-        std::fprintf(file,"{\"automatic\":%s,\"syntheticPassed\":%s,\"physicalIsolationProven\":false,"
+        int written=std::fprintf(file,"{\"robloxGuard\":%s,\"robloxPid\":%lu,\"robloxHwnd\":%llu,\"robloxReaction\":null,\"physicalMovesRouted\":%d,\"cursorChangedSamples\":%d,\"automatic\":%s,\"syntheticPassed\":%s,\"physicalIsolationProven\":false,"
+          "\"fixturePhysicalCheckPassed\":%s,\"routingStarted\":%s,\"completed\":%s,\"elapsedMs\":%llu,\"stopCode\":%lu,\"physicalKeyDownsRouted\":%d,\"physicalClicksRouted\":%d,"
           "\"macroKeys\":%d,\"macroClicks\":%d,\"workKeys\":%d,\"workClicks\":%d,\"keyboardHookCallbacks\":%d,"
           "\"baseline\":{\"legacyA\":%d,\"rawA\":%d,\"rawMouse\":%d},"
           "\"routing\":{\"legacyA\":%d,\"rawA\":%d,\"rawMouse\":%d},\"unhookApiFailures\":%d}\n",
-          automatic?"true":"false",automatic?(passed?"true":"false"):"null",macroKeys,macroClicks-baseClicks,workKeys,workClicks,hookKeys,
+          robloxGuard?"true":"false",robloxPid,static_cast<unsigned long long>(reinterpret_cast<ULONG_PTR>(roblox)),routedMoves,cursorChanges,automatic?"true":"false",automatic?(passed?"true":"false"):"null",physicalPassed?"true":"false",startedRouting?"true":"false",completed?"true":"false",elapsed,stopCode,physicalKeys,physicalClicks,macroKeys,macroClicks-baseClicks,workKeys,workClicks,hookKeys,
           baseA,baseRawA,baseRawMouse,legacyA-baseA,rawA-baseRawA,rawMouse-baseRawMouse,unhookFailures.load());
-        std::fclose(file);
-    }else status+=L" Report could not be written.";
+        int closed=std::fclose(file);reportWritten=written>=0 && closed==0;
+    }
     began=0;
-    if(GetForegroundWindow()==target){SetCursorPos(saved.x,saved.y);if(IsWindow(previous)&&previous!=target)SetForegroundWindow(previous);}
+    status=physicalPassed?L"Physical fixture check passed. Roblox still needs a separate test.":automatic?(passed?L"Synthetic control passed.":L"Synthetic control failed."):completed?L"Test completed. Physical check did not pass; report has the counts.":L"Test interrupted before completion. See stopCode in the report.";
+    if(stopCode==22 || stopCode==24 || stopCode==25)status=reason;
+    if(robloxGuard && completed)status=L"Roblox guard completed. Visible Roblox reaction must be checked separately.";
+    status+=reportWritten?L" Report saved.":L" Report could not be written.";
+    if(!robloxGuard && GetForegroundWindow()==target){SetCursorPos(saved.x,saved.y);if(IsWindow(previous)&&previous!=target)SetForegroundWindow(previous);}
+    SetWindowPos(work,HWND_NOTOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
     EnableWindow(GetDlgItem(target,1),TRUE);InvalidateRect(target,nullptr,TRUE);
+    EnableWindow(GetDlgItem(target,2),TRUE);
     if(automatic)PostMessageW(target,WM_CLOSE,0,0);
 }
 static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data){
     if(code>=0 && active()){
         ++hookKeys;
         const auto& k=*reinterpret_cast<KBDLLHOOKSTRUCT*>(data);
+        if(robloxGuard){stopCode=k.vkCode==VK_F10?10:11;release();return 1;}
         if(k.dwExtraInfo==macroTag || ((k.flags&LLKHF_INJECTED) && k.dwExtraInfo!=controlTag))return CallNextHookEx(nullptr,code,message,data);
         if(k.vkCode=='A'){
             LPARAM flags=1 | (static_cast<LPARAM>(k.scanCode)<<16);
             if(message==WM_KEYUP)flags|=static_cast<LPARAM>(0xC0000000u);
-            if(PostMessageW(work,static_cast<UINT>(message),'A',flags))return 1;
+            if(PostMessageW(work,static_cast<UINT>(message),'A',flags)){if(!(k.flags&LLKHF_INJECTED) && message==WM_KEYDOWN)++physicalKeys;return 1;}
         }
+        stopCode=k.vkCode==VK_F10?10:11;
         release();
     }
     return CallNextHookEx(nullptr,code,message,data);
@@ -74,19 +104,22 @@ static LRESULT CALLBACK mouse(int code,WPARAM message,LPARAM data){
             POINT real{};GetCursorPos(&real);
             virtualPoint.x=std::clamp(virtualPoint.x+m.pt.x-real.x,5L,395L);
             virtualPoint.y=std::clamp(virtualPoint.y+m.pt.y-real.y,5L,275L);
-            if(PostMessageW(work,static_cast<UINT>(message),message==WM_LBUTTONDOWN?MK_LBUTTON:0,MAKELPARAM(virtualPoint.x,virtualPoint.y)))return 1;
+            if(PostMessageW(work,static_cast<UINT>(message),message==WM_LBUTTONDOWN?MK_LBUTTON:0,MAKELPARAM(virtualPoint.x,virtualPoint.y))){if(!(m.flags&LLMHF_INJECTED)){if(message==WM_LBUTTONUP)++physicalClicks;if(message==WM_MOUSEMOVE)++routedMoves;}return 1;}
         }
+        stopCode=12;
         release();
+        if(robloxGuard)return 1;
     }
     return CallNextHookEx(nullptr,code,message,data);
 }
 static void injectKey(WORD key,ULONG_PTR tag){
-    if(!active())return;
+    if(robloxGuard || !active())return;
     INPUT e[2]{};e[0].type=e[1].type=INPUT_KEYBOARD;e[0].ki.wVk=e[1].ki.wVk=key;
     e[0].ki.dwExtraInfo=e[1].ki.dwExtraInfo=tag;e[1].ki.dwFlags=KEYEVENTF_KEYUP;
     if(SendInput(2,e,sizeof(INPUT))!=2)release();
 }
 static void injectClick(ULONG_PTR tag){
+    if(robloxGuard)return;
     POINT p{};GetCursorPos(&p);if(!active() || WindowFromPoint(p)!=target)return;
     INPUT e[2]{};e[0].type=e[1].type=INPUT_MOUSE;e[0].mi.dwFlags=MOUSEEVENTF_LEFTDOWN;e[1].mi.dwFlags=MOUSEEVENTF_LEFTUP;
     e[0].mi.dwExtraInfo=e[1].mi.dwExtraInfo=tag;if(SendInput(2,e,sizeof(INPUT))!=2)release();
@@ -96,31 +129,61 @@ static void begin(){
     if(!rawReady || WaitForSingleObject(observer,0)!=WAIT_TIMEOUT){status=L"Raw input observer unavailable. Close and reopen this experiment.";InvalidateRect(target,nullptr,TRUE);return;}
     for(int key:{VK_LBUTTON,VK_RBUTTON,VK_MBUTTON,VK_SHIFT,VK_CONTROL,VK_MENU,VK_LWIN,VK_RWIN,0x41})
         if(GetAsyncKeyState(key)<0){status=L"Release keys/buttons and try again.";InvalidateRect(target,nullptr,TRUE);return;}
-    previous=GetForegroundWindow();GetCursorPos(&saved);SetForegroundWindow(target);SetFocus(target);
-    if(GetForegroundWindow()!=target){status=L"Test window could not get focus. No hooks installed.";return;}
-    POINT p{300,190};ClientToScreen(target,&p);SetCursorPos(p.x,p.y);
+    roblox=nullptr;robloxPid=0;
+    if(robloxGuard){
+        int matches=0;
+        EnumWindows([](HWND hwnd,LPARAM data)->BOOL{if(validRoblox(hwnd)){++*reinterpret_cast<int*>(data);roblox=hwnd;}return TRUE;},reinterpret_cast<LPARAM>(&matches));
+        if(matches!=1){status=L"Open exactly one visible Roblox window in a safe menu, then retry.";InvalidateRect(target,nullptr,TRUE);return;}
+        GetWindowThreadProcessId(roblox,&robloxPid);
+    }
+    previous=GetForegroundWindow();GetCursorPos(&saved);SetForegroundWindow(focusTarget());
+    if(!robloxGuard)SetFocus(target);
+    if(GetForegroundWindow()!=focusTarget()){status=L"Test window could not get focus. No hooks installed.";InvalidateRect(target,nullptr,TRUE);return;}
+    if(!robloxGuard){POINT p{300,190};ClientToScreen(target,&p);SetCursorPos(p.x,p.y);}
+    GetCursorPos(&pinnedCursor);routedMoves=cursorChanges=0;
     macroKeys=macroClicks=legacyA=rawA=rawMouse=workKeys=workClicks=hookKeys=0;unhookFailures=0;
+    physicalKeys=physicalClicks=0;stopCode=0;
     baseA=baseRawA=baseRawMouse=baseClicks=beats=0;sentControl=startedRouting=false;
     began=GetTickCount64();running=true;
-    if(!CreateTimerQueueTimer(&watchdog,nullptr,expire,nullptr,22000,0,WT_EXECUTEONLYONCE)){stop(L"Safety timer setup failed");return;}
-    if(!SetTimer(target,1,100,nullptr)){stop(L"UI timer setup failed");return;}
+    if(!CreateTimerQueueTimer(&watchdog,nullptr,expire,nullptr,22000,0,WT_EXECUTEONLYONCE)){stopCode=24;stop(L"Safety timer setup failed");return;}
+    if(!SetTimer(target,1,100,nullptr)){stopCode=25;stop(L"UI timer setup failed");return;}
+    if(robloxGuard){
+        mouseHook=SetWindowsHookExW(WH_MOUSE_LL,mouse,GetModuleHandleW(nullptr),0);
+        keyHook=SetWindowsHookExW(WH_KEYBOARD_LL,keyboard,GetModuleHandleW(nullptr),0);
+        if(!mouseHook || !keyHook){stopCode=22;stop(L"Hook setup failed");return;}
+        startedRouting=true;
+        SetWindowPos(work,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+    }
     EnableWindow(GetDlgItem(target,1),FALSE);
+    EnableWindow(GetDlgItem(target,2),FALSE);
 }
 static void tick(){
-    if(!active() || WaitForSingleObject(observer,0)!=WAIT_TIMEOUT){stop(L"Stopped: timeout, focus change, other key/button, or input error.");return;}
+    const auto focus=GetForegroundWindow();
+    if(running && GetTickCount64()-began<20000 && focus!=focusTarget() && (startedRouting || focus!=work))stopCode=20;
+    if(robloxGuard){
+        DWORD pid=0;GetWindowThreadProcessId(roblox,&pid);
+        if(!IsWindow(roblox) || !IsWindowVisible(roblox) || IsIconic(roblox) || pid!=robloxPid)stopCode=23;
+        POINT p{};GetCursorPos(&p);if(p.x!=pinnedCursor.x || p.y!=pinnedCursor.y)++cursorChanges;
+    }
+    if(WaitForSingleObject(observer,0)!=WAIT_TIMEOUT)stopCode=21;
+    if(!running || GetTickCount64()-began>=20000 || stopCode!=0){stop(L"Test stopped");return;}
     if(GetTickCount64()-began>=5000 && !startedRouting){
+        SetForegroundWindow(target);SetFocus(target);
+        if(GetForegroundWindow()!=target){stopCode=20;stop(L"Could not focus the macro fixture");return;}
+        POINT p{300,190};ClientToScreen(target,&p);SetCursorPos(p.x,p.y);
         baseA=legacyA;baseRawA=rawA;baseRawMouse=rawMouse;baseClicks=macroClicks;startedRouting=true;
         mouseHook=SetWindowsHookExW(WH_MOUSE_LL,mouse,GetModuleHandleW(nullptr),0);
         keyHook=SetWindowsHookExW(WH_KEYBOARD_LL,keyboard,GetModuleHandleW(nullptr),0);
-        if(!mouseHook || !keyHook){stop(L"Hook setup failed");return;}
+        if(!mouseHook || !keyHook){stopCode=22;stop(L"Hook setup failed");return;}
     }
-    if(startedRouting && ++beats%7==0){injectKey(VK_F6,macroTag);injectClick(macroTag);}
+    if(startedRouting && !robloxGuard && ++beats%7==0){injectKey(VK_F6,macroTag);injectClick(macroTag);}
     if(startedRouting && automatic && !sentControl){sentControl=true;injectKey('A',controlTag);injectClick(controlTag);}
     InvalidateRect(target,nullptr,TRUE);InvalidateRect(work,nullptr,TRUE);
 }
 static LRESULT CALLBACK window(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     bool isWork=hwnd==work;
-    if(msg==WM_COMMAND && !isWork && LOWORD(w)==1){begin();return 0;}
+    if(msg==WM_COMMAND && !isWork && LOWORD(w)==1 && !began){robloxGuard=false;begin();return 0;}
+    if(msg==WM_COMMAND && !isWork && LOWORD(w)==2 && !began){robloxGuard=true;begin();if(!began)robloxGuard=false;return 0;}
     if(msg==WM_TIMER && !isWork){tick();return 0;}
     if(msg==WM_APP+1){rawReady=true;if(automatic)PostMessageW(target,WM_COMMAND,1,0);return 0;}
     if(msg==WM_APP+2){if(running){if(w==0)++rawMouse;else if(w==1)++rawA;}return 0;}
@@ -131,9 +194,10 @@ static LRESULT CALLBACK window(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     if(msg==WM_PAINT){
         PAINTSTRUCT ps{};HDC dc=BeginPaint(hwnd,&ps);RECT rect{};GetClientRect(hwnd,&rect);FillRect(dc,&rect,GetSysColorBrush(COLOR_WINDOW));
         wchar_t text[1400]{};
-        if(isWork){swprintf_s(text,L"Background work fixture\nA presses: %d\nClicks: %d\n\nBlue dot = routed user pointer",workKeys,workClicks);}
-        else swprintf_s(text,L"%s\n\nOnly use A, mouse movement and left clicks.\nF10 or any other key/button stops the experiment.\nAutomatic stop after 20 seconds.\n\nMacro F6: %d    Target A: %d    Target clicks: %d\nPhysical raw packets: A=%d, mouse=%d\n%s",
-            running?(startedRouting?L"ROUTING PHASE":L"BASELINE PHASE - move mouse and tap A"):status.c_str(),macroKeys,legacyA,macroClicks,rawA,rawMouse,report.c_str());
+        if(isWork){swprintf_s(text,L"Background work fixture\nA presses: %d\nClicks: %d\nMoves: %d\n\nBlue dot = routed user pointer\n%s",workKeys,workClicks,routedMoves,robloxGuard?(running?L"ROBLOX GUARD: move mouse only. Any key stops.":L"Guard finished. Normal input restored."):L"");}
+        else swprintf_s(text,L"%s\n\n%s\nAutomatic stop after 20 seconds.\n\nMacro F6: %d    Target A: %d    Target clicks: %d\nPhysical raw packets: A=%d, mouse=%d\n%s",
+            running?(robloxGuard?L"ROBLOX GUARD ACTIVE - move mouse only":startedRouting?L"ROUTING ACTIVE - move, left-click, tap A":L"BASELINE (5 seconds) - keep this window focused, move mouse and tap A"):status.c_str(),
+            robloxGuard?L"Move mouse only. Do not click or type. F10 or any key stops.":L"Only use A, mouse movement and left clicks.\nF10 or any other key/button stops the experiment.",macroKeys,legacyA,macroClicks,rawA,rawMouse,report.c_str());
         rect.left+=20;rect.top+=15;rect.right-=15;DrawTextW(dc,text,-1,&rect,DT_LEFT|DT_WORDBREAK);
         if(isWork){HBRUSH brush=CreateSolidBrush(RGB(55,100,220));auto old=SelectObject(dc,brush);Ellipse(dc,virtualPoint.x-6,virtualPoint.y-6,virtualPoint.x+6,virtualPoint.y+6);SelectObject(dc,old);DeleteObject(brush);}
         EndPaint(hwnd,&ps);return 0;
@@ -179,6 +243,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int){
     work=CreateWindowExW(WS_EX_NOACTIVATE,cls.lpszClassName,L"TinyTask background work fixture",WS_OVERLAPPEDWINDOW,710,80,420,320,nullptr,nullptr,instance,nullptr);
     if(!target || !work)return 3;
     CreateWindowW(L"BUTTON",L"Start 20-second test",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,20,270,220,35,target,reinterpret_cast<HMENU>(1),instance,nullptr);
+    CreateWindowW(L"BUTTON",L"Roblox mouse-only guard (20s)",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,260,270,300,35,target,reinterpret_cast<HMENU>(2),instance,nullptr);
     wchar_t exe[MAX_PATH]{};if(!GetModuleFileNameW(nullptr,exe,MAX_PATH))return 4;
     std::wstring command=L"\""+std::wstring(exe)+L"\" --raw-observer "+std::to_wstring(reinterpret_cast<ULONG_PTR>(target));
     STARTUPINFOW startup{};startup.cb=sizeof(startup);PROCESS_INFORMATION child{};

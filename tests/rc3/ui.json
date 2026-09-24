@@ -1,0 +1,66 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "name": "Empty Play shows friendly guidance",
+      "passed": true
+    },
+    {
+      "name": "Macro preview/save preserves all JSON",
+      "passed": true
+    },
+    {
+      "name": "Invalid document cannot replace open macro",
+      "passed": true
+    },
+    {
+      "name": "Advanced and dark theme render",
+      "passed": true
+    },
+    {
+      "name": "Preferences inherit dark palette",
+      "passed": true
+    },
+    {
+      "name": "Repeated test clicks register without claiming isolation",
+      "passed": true
+    },
+    {
+      "name": "Only assigned mouse affects test cursor",
+      "passed": true
+    },
+    {
+      "name": "Cursor speed retains fractions and matching uses screen conversion",
+      "passed": true
+    },
+    {
+      "name": "Unapproved component cannot be installed",
+      "passed": true
+    },
+    {
+      "name": "Disconnected assignments never select another mouse",
+      "passed": true
+    },
+    {
+      "name": "Diagnostics inherit dark palette",
+      "passed": true
+    },
+    {
+      "name": "Closed target does not select a different app",
+      "passed": true
+    },
+    {
+      "name": "Raw Input registration",
+      "passed": true
+    },
+    {
+      "name": "Visual cursor independent",
+      "passed": true
+    },
+    {
+      "name": "Emergency message releases observation",
+      "passed": true
+    }
+  ],
+  "scope": "UI and simulated device filtering; not physical isolation or virtual HID"
+}

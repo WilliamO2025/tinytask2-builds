@@ -1,5 +1,21 @@
 # Reversed-focus routing experiment
 
+## Physical run completed September 23
+
+`tests/route-native-physical-completed.json` records a full 20,078 ms run with
+stopCode 0 and zero unhook API failures. The background fixture received 77 physical
+A presses and 75 clicks; the foreground fixture received 19 macro F6 presses and
+19 macro clicks. Baseline observation recorded 25 raw A events and 521 raw mouse
+packets. During routing, no legacy A or raw A events leaked, but the separate global
+Raw Input observer still received 1,937 hardware mouse packets.
+
+This establishes successful physical message routing in the owned fixtures and
+keyboard suppression in this run. It does not establish mouse isolation: the raw
+mouse path remains observable. The observer uses RIDEV_INPUTSINK in a separate
+process, so this is not a measurement of Roblox's own input consumption. No Roblox
+compatibility conclusion follows from these counts. `fixturePhysicalCheckPassed`
+and `physicalIsolationProven` remain false. No driver or OS protection was changed.
+
 ## Result so far
 
 A new standalone, native Win32 experiment keeps the macro fixture focused while

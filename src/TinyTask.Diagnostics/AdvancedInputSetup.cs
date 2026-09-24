@@ -31,7 +31,11 @@ internal static class AdvancedInputSetup
         void Text(string value)=>panel.Children.Add(new TextBlock{Text=value,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,14)});
         Text("Advanced Input Support — Setup not yet available");
         Text("No TinyTask-managed input component is installed. Classic Mode works without one.");
-        Text("The preferred Microsoft-supported driver needs a completed source driver and trusted signing. A virtual HID device alone does not separate Windows cursors or focus, or prevent physical keys reaching Roblox.");
+        Text("The device-filter policy prototype passes its software recovery tests. It is not an installable driver: the Windows driver adapter, routing service, hardware tests and trusted signing are still required.");
+        Text("The separate 20-second routing test can move a virtual cursor while the real cursor stays still. Roblox may still receive physical clicks. This is an experiment, not verified Roblox isolation.");
+        var experiment=new Button{Content="Get experimental routing test"};
+        experiment.Click+=(_,_)=>{try{System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("https://github.com/WilliamO2025/tinytask2-builds/releases/tag/v0.2.0-rc3"){UseShellExecute=true});}catch(Exception e){UiTheme.Message(window,e.Message,"Could not open downloads");}};
+        panel.Children.Add(experiment);
         Text("Installation is blocked until a specific package passes publisher, license, signature, device-safety and removal checks. No software is downloaded and no administrator permission is requested on this screen.");
         var status=new TextBlock{TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,12,0,12)};
         var check=new Button{Content="Check connected devices"};check.Click+=(_,_)=>{try{var devices=RawInput.Devices();status.Text=$"Windows reports {devices.Count(d=>d.Type==0)} mouse and {devices.Count(d=>d.Type==1)} keyboard entries. Detection is not proof of working input or isolation.";}catch(Exception e){status.Text="Device check failed. Retry or open Diagnostics. "+e.Message;}};

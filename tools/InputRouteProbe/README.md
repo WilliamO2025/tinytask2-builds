@@ -1,5 +1,25 @@
 # Bounded input-routing experiment
 
+## Roblox mouse-only guard
+
+The additional **Roblox mouse-only guard (20s)** button requires exactly one visible,
+non-minimized `RobloxPlayerBeta.exe` window. First put Roblox in its home screen or
+a harmless menu. Start the guard and move the physical mouse only. Do not click or
+type. The test activates Roblox and routes physical mouse movement to the owned
+background fixture. Left clicks are routed to the fixture if accidentally pressed,
+but raw-input leakage is not ruled out. Any keyboard input (including F10), another
+mouse button, focus loss, target disappearance, or 20 seconds ends the test.
+
+No input is injected into Roblox, no process memory is accessed, and no driver is
+installed. The existing 22-second independent hook-release watchdog remains active.
+The report includes target PID/HWND, physical routed movement, cursor-change samples,
+and global raw-input counts. `robloxReaction` is null: visible application reaction
+must be observed separately. A stationary cursor is not proof of raw-input isolation.
+This check does not establish keyboard routing, macro playback, or gameplay support.
+
+Build separately using `./build-native.ps1 -Preview` to preserve the earlier binary.
+Launch the preview from `dist/route-roblox-probe/TinyTask2-NativeRouteProbe.exe`.
+
 This is an experiment, not a Roblox fix or a replacement release. Double-click
 `dist/route-probe/TinyTask2-NativeRouteProbe.exe`. No installation, driver, or runtime
 download is needed. Click **Start 20-second test**, release other keys/buttons, then

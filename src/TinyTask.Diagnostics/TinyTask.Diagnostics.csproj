@@ -7,7 +7,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>TinyTask2</AssemblyName>
-    <Version>0.2.0</Version>
+    <Version>0.2.0-rc3</Version>
     <Product>TinyTask 2.0</Product>
     <Description>Classic macro recorder with experimental input diagnostics</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
