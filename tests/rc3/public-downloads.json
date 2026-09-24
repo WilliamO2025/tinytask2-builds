@@ -1,0 +1,34 @@
+{
+  "releasePage": 200,
+  "assets": [
+    {
+      "name": "TinyTask2-Windows.exe",
+      "status": 200
+    },
+    {
+      "name": "TinyTask2-Windows.Setup.exe",
+      "status": 200
+    },
+    {
+      "name": "TinyTask2-Windows-InputLab.exe",
+      "status": 200
+    },
+    {
+      "name": "TinyTask2-Windows-Routing-Test.exe",
+      "status": 200
+    },
+    {
+      "name": "TinyTask2-macOS.zip",
+      "status": 200
+    },
+    {
+      "name": "TinyTask2-macOS-InputLab.zip",
+      "status": 200
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "status": 200
+    }
+  ],
+  "routingTestDownloadedAndHashMatched": true
+}

@@ -63,3 +63,11 @@ keys/clicks, one routed control key/click and zero unhook failures. These result
 not prove Roblox isolation. CodeRabbit review and fixes are recorded in the source.
 
 Existing rc1 and rc2 releases remain available and unchanged.
+
+## Final review resolution
+
+CodeRabbit reported three app/test issues (two referred to the not-yet-published
+rc3 URL) and one filter-policy issue. Setup failures now retain their reason and
+nonzero stop code. The published app URL and all seven public asset URLs returned
+HTTP 200. Filter queue round-trip coverage now includes UnitId, RawButtons and
+ExtraInformation; all 98 checks passed again. No runtime driver isolation is claimed.
