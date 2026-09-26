@@ -49,6 +49,8 @@ final class ClassicEngine {
     private var timer: Timer?
     private var lastRecord = 0.0, recordStart = 0.0, lastMove = 0.0
     private var started = 0.0, pausedAt = 0.0, due = 0.0
+    private var offsets: [Double] = []
+    private var loopDuration = 0.0
     private var index = 0, loop = 0, loops = 1
     private var continuous = false, speed = 1.0
     private var macro = MacroDocument()
@@ -122,7 +124,13 @@ final class ClassicEngine {
         guard !document.actions.contains(where: { ["keyDown", "keyUp"].contains($0.type) && [recordKey, playKey, stopKey].contains($0.key) }) else { throw MacroError.message("This macro contains a control hotkey. Change the recording/playback hotkeys first.") }
         guard CGEventSource.flagsState(.combinedSessionState).intersection([.maskShift, .maskControl, .maskAlternate, .maskCommand]).isEmpty else { throw MacroError.message("Release modifier keys before playback.") }
         macro = document; self.speed = speed; self.loops = loops; self.continuous = continuous; index = 0; loop = 0
-        started = ProcessInfo.processInfo.systemUptime; due = 3 + macro.actions[0].delay / speed; setState("Playing")
+        var original = 0.0
+        offsets = document.actions.map { action in
+            original += action.delay
+            return original / speed
+        }
+        loopDuration = original / speed
+        started = ProcessInfo.processInfo.systemUptime; due = offsets[0]; setState("Playing")
         timer = Timer(timeInterval: 0.005, repeats: true) { [weak self] _ in self?.tick() }; RunLoop.main.add(timer!, forMode: .common)
     }
     private func tick() {
@@ -135,7 +143,7 @@ final class ClassicEngine {
                     release(clear: true); loop += 1
                     if !continuous && loop >= loops { stop(); return }; index = 0
                 }
-                due += macro.actions[index].delay / speed
+                due = Double(loop) * loopDuration + offsets[index]
             }
         } catch { stop(); failed?(error.localizedDescription) }
     }

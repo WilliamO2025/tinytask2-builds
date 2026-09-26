@@ -37,10 +37,10 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         stack.addArrangedSubview(row([openButton, saveButton, recordButton, playButton, pauseButton, stopButton]))
         name.font = .systemFont(ofSize: 20, weight: .semibold); stack.addArrangedSubview(name)
         detail.textColor = .secondaryLabelColor; stack.addArrangedSubview(detail)
-        speed.addItems(withObjectValues: ["0.5", "1", "2", "10", "100"]); speed.stringValue = defaults.string(forKey: "speed") ?? "1"; speed.widthAnchor.constraint(equalToConstant: 85).isActive = true
+        speed.addItems(withObjectValues: ["0.5", "1", "1.5", "2", "10", "100"]); speed.stringValue = defaults.string(forKey: "speed") ?? "1"; speed.widthAnchor.constraint(equalToConstant: 85).isActive = true
         loops.stringValue = defaults.string(forKey: "loops") ?? "1"; loops.widthAnchor.constraint(equalToConstant: 65).isActive = true; continuous.state = defaults.bool(forKey: "continuous") ? .on : .off
         stack.addArrangedSubview(row([NSTextField(labelWithString: "Speed"), speed, NSTextField(labelWithString: "×    Loops"), loops, continuous]))
-        let note = NSTextField(wrappingLabelWithString: "Classic playback controls your mouse and keyboard. Starts after 3 seconds. F10 stops."); note.textColor = .secondaryLabelColor; stack.addArrangedSubview(note)
+        let note = NSTextField(wrappingLabelWithString: "Classic playback controls your mouse and keyboard. Starts immediately; recorded delays are preserved. F10 stops."); note.textColor = .secondaryLabelColor; stack.addArrangedSubview(note)
         advanced.orientation = .vertical; advanced.alignment = .leading; advanced.spacing = 12
         advanced.addArrangedSubview(NSTextField(wrappingLabelWithString: "Advanced Mode is experimental. Background input, second-mouse isolation and virtual focus are unavailable on macOS. Use Classic to record and play."))
         advanced.addArrangedSubview(button("Open Input Lab diagnostics", #selector(diagnostics))); advanced.isHidden = true; stack.addArrangedSubview(advanced)

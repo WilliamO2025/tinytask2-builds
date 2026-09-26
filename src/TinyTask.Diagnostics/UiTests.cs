@@ -33,9 +33,18 @@ internal static class UiTests
             Check("Macro preview/save preserves all JSON",File.ReadAllText(copy)==json);
             bool rejected=false;try{home.LoadDocument("[]","Invalid");}catch(InvalidDataException){rejected=true;}
             home.SaveCopy(copy);Check("Invalid document cannot replace open macro",rejected && File.ReadAllText(copy)==json);
+            var savedProfile=new PlaybackSettings(1.5,20,true).Write(json,"Fishing");
+            Check("Task settings round trip",PlaybackSettings.Read(savedProfile)==new PlaybackSettings(1.5,20,true));
+            using(var profileDoc=JsonDocument.Parse(savedProfile))Check("Task profile preserves unrelated JSON",profileDoc.RootElement.GetProperty("metadata").GetString()=="preserve me"&&profileDoc.RootElement.GetProperty("actions")[0].GetProperty("futureField").GetBoolean());
+            Check("Speed entry rejects letters symbols and exponent",!PlaybackSettings.IsNumericText("abc")&&!PlaybackSettings.IsNumericText("1e2")&&!PlaybackSettings.IsNumericText("-1")&&!PlaybackSettings.IsNumericText("1.2.3")&&PlaybackSettings.ParseSpeed("1.5")==1.5);
+            bool speedRejected=false;try{PlaybackSettings.ParseSpeed("1001");}catch(ArgumentException){speedRejected=true;}Check("Out of range speed rejected",speedRejected);
+            var chord=new Shortcut(0x50,6);
+            Check("Combination distinguishes plain key from shortcut",!Shortcut.Contains(new[]{new MacroAction{Type="keyDown",Key=0x50}},new[]{chord})&&Shortcut.Contains(new[]{new MacroAction{Type="keyDown",Key=0x11},new MacroAction{Type="keyDown",Key=0x10},new MacroAction{Type="keyDown",Key=0x50}},new[]{chord}));
             home.ConfigureSnapshot("advanced-dark");Check("Advanced and dark theme render",home.IsVisible && home.Title=="TinyTask 2.0");
             Snapshot(home,report,"home-dark");
             var settings=home.CreateSettingsWindow();try{settings.Show();foreach(var expander in Descendants<System.Windows.Controls.Expander>(settings))expander.IsExpanded=true;Snapshot(settings,report,"settings-dark");Check("Preferences inherit dark palette",UiTheme.IsDark(settings));}finally{settings.Close();}
+            var session=new SessionWindow(home,()=>{},()=>"Test task",_=>Task.CompletedTask);
+            try{session.Show();Snapshot(session,report,"sessions-dark");Check("Sessions inherit dark palette without connecting",UiTheme.IsDark(session));}finally{session.Close();}
             var wizard=new SetupWizard(null){Owner=home};
             try {wizard.Show();Check("Repeated test clicks register without claiming isolation",await wizard.TestRepeatedClicks());Check("Only assigned mouse affects test cursor",wizard.TestDeviceFilter());Check("Cursor speed retains fractions and matching uses screen conversion",wizard.TestCursorScaling());wizard.ShowCursorSettingsForTest();Snapshot(wizard,report,"wizard-dark");}finally{wizard.Close();}
             var support=AdvancedInputSetup.Create(home);try{support.Show();Snapshot(support,report,"advanced-support-dark");Check("Unapproved component cannot be installed",System.Linq.Enumerable.Any(Descendants<System.Windows.Controls.Button>(support),b=>Equals(b.Content,"Install Advanced Input Support") && !b.IsEnabled));}finally{support.Close();}

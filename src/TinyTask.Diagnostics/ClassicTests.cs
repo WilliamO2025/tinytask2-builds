@@ -60,6 +60,17 @@ internal static class ClassicTests
             Check("F10 stops while a modifier is held",engine.State=="Ready" && (Native.GetAsyncKeyState(0xA0)&0x8000)==0);
             playing=engine.Play(new(){Actions=new(){new(){Type="delay"}}},100,1,true,0);await Task.Delay(50);engine.Stop();await playing;
             Check("Continuous zero-delay loop is cancellable",engine.State=="Ready");
+            int disarmed=0;engine.Disarmed+=()=>disarmed++;
+            engine.Prepare(hold,1,true);Check("Preparation arms emergency stop without pressing keys",engine.Armed&&(Native.GetAsyncKeyState(0xA0)&0x8000)==0);
+            await Task.Run(()=>{ClassicEngine.Send(new(){Type="keyDown",Key=121,Scan=0x44});ClassicEngine.Send(new(){Type="keyUp",Key=121,Scan=0x44});});await Task.Delay(50);
+            Check("F10 cancels an armed task and notifies session readiness",!engine.Armed&&disarmed==1);
+            var editable=new MacroDocument{Actions=new(){new(){Type="delay",Delay=0.01}}};engine.Prepare(editable,1);editable.Actions[0].Delay=0.08;var editedClock=Stopwatch.StartNew();await engine.Play(editable,1,1,false);
+            Check("Edited macro invalidates prepared native timeline",editedClock.Elapsed.TotalSeconds>=0.075);
+            var lateness=new MacroDocument{Actions=new(){new(){Type="delay",Delay=0.05}}};
+            playing=engine.Play(lateness,1,1,false);Thread.Sleep(650);bool lateStopped=false;try{await playing;}catch(InvalidOperationException){lateStopped=true;}
+            Check("Severe lateness stops instead of replaying backlog",lateStopped&&engine.State=="Ready"&&engine.PeakLatenessMilliseconds>=500);
+            var clock=Stopwatch.StartNew();await engine.Play(new(){Actions=new(){new(){Type="delay",Delay=0.02}}},1,1,false,synchronizedStart:SessionConnection.Now+0.08);
+            Check("Synchronized start anchors original delay",clock.Elapsed.TotalSeconds>=0.095);
             bool rejected=false;try{MacroDocument.Parse("{\"actions\":[{\"type\":\"delay\",\"delay\":-1}]}");}catch(ArgumentException){rejected=true;}Check("Invalid delay rejected",rejected);
         }
         catch(Exception e){passed=false;results.Add(new{error=e.ToString()});}
