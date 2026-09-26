@@ -4,15 +4,15 @@ A compact Classic macro recorder for Windows and macOS, with a separate experime
 
 ## Downloads
 
-RC5 fixes fine mouse-movement capture, empty recordings and toolbar playback blocked by shortcut conflicts. Experimental sessions now support Windows and Mac using the same configured server; no public server is provided. Each computer runs its own local recording.
+RC6 adds lossless compressed recordings, bounded native playback preparation, and an improved Mac permission flow. Recordings have no fixed time/action cap; available RAM and disk remain limits. Experimental sessions now support Windows and Mac using the same configured server; no public server is provided. Each computer runs its own local recording.
 
-[Download v0.2.0-rc5 from GitHub Releases](https://github.com/WilliamO2025/tinytask2-builds/releases/tag/v0.2.0-rc5).
+[Download v0.2.0-rc6 from GitHub Releases](https://github.com/WilliamO2025/tinytask2-builds/releases/tag/v0.2.0-rc6).
 
-- [Windows installer](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc5/TinyTask2-Windows.Setup.exe)
-- [Windows portable app](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc5/TinyTask2-Windows.exe)
-- [TinyTask 2.0 for macOS](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc5/TinyTask2-macOS.zip)
-- [Windows Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc5/TinyTask2-Windows-InputLab.exe)
-- [macOS Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc5/TinyTask2-macOS-InputLab.zip)
+- [Windows installer](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc6/TinyTask2-Windows.Setup.exe)
+- [Windows portable app](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc6/TinyTask2-Windows.exe)
+- [TinyTask 2.0 for macOS](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc6/TinyTask2-macOS.zip)
+- [Windows Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc6/TinyTask2-Windows-InputLab.exe)
+- [macOS Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc6/TinyTask2-macOS-InputLab.zip)
 
 Windows: run the installer for Start Menu and desktop shortcuts, or open the portable EXE. The runtime is included. Builds are unsigned and may trigger SmartScreen.
 
@@ -20,7 +20,7 @@ Mac: unzip on your Mac, move TinyTask 2.0.app to Applications, open it, and gran
 
 ## Classic Mode
 
-Record mouse movement/clicks, scrolling, keyboard input and timing; open/save JSON macros; play, pause, stop, change speed and loop. Classic playback controls the system mouse and keyboard. F8 records, F9 plays/pauses, F10 stops; shortcuts are configurable (Mac may require Fn). Preferences support light/dark appearance. Macros are platform-specific; original TinyTask .rec import and a graphical action editor are not included.
+Record mouse movement/clicks, scrolling, keyboard input and timing; open/save compressed .ttmacro or plain JSON macros; play, pause, stop, change speed and loop. Classic playback controls the system mouse and keyboard. F8 records, F9 plays/pauses, F10 stops; shortcuts are configurable (Mac may require Fn). Preferences support light/dark appearance. Macros are platform-specific; original TinyTask .rec import and a graphical action editor are not included.
 
 ## Advanced Mode is experimental
 
