@@ -10,7 +10,11 @@ async Task Command(string type,Dictionary<string,object> fields){fields["type"]=
 await Send(new{type="hello",protocol=1,deviceId=Guid.NewGuid(),secret=Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),username="Windows protocol peer",publicId="WINDOWS-TEST"});
 while(true){
  var bytes=new byte[16384];int size=0;WebSocketReceiveResult result;
- do{result=await socket.ReceiveAsync(new ArraySegment<byte>(bytes,size,bytes.Length-size),timeout.Token);size+=result.Count;}while(!result.EndOfMessage);
+ do{
+  var receive=socket.ReceiveAsync(new ArraySegment<byte>(bytes,size,bytes.Length-size),timeout.Token);
+  while(!receive.IsCompleted){if(await Task.WhenAny(receive,Task.Delay(2000,timeout.Token))!=receive)await Send(new{type="ping",sent=Now()});}
+  result=await receive;size+=result.Count;
+ }while(!result.EndOfMessage);
  using var doc=JsonDocument.Parse(bytes.AsMemory(0,size));var packet=doc.RootElement;string type=packet.GetProperty("type").GetString();
  if(type=="error")throw new Exception(packet.GetProperty("message").GetString());
  if(type=="invitation")await Command("accept",new(){["inviteId"]=packet.GetProperty("inviteId").GetString()});
