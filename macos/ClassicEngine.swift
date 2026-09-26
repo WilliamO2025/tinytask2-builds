@@ -327,22 +327,18 @@ enum MacroFiles {
         try gzip(input, decompress: false).write(to: url, options: .atomic)
     }
     private static func gzip(_ input: URL, decompress: Bool, byteBudget: Int = Int.max) throws -> Data {
-        let output = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: output) }
-        guard FileManager.default.createFile(atPath: output.path, contents: nil) else { throw MacroError.message("Could not create macro temporary file.") }
-        let source = try FileHandle(forReadingFrom: input), destination = try FileHandle(forWritingTo: output)
-        defer { try? source.close(); try? destination.close() }
+        let source = try FileHandle(forReadingFrom: input); defer { try? source.close() }
         let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/bin/gzip"); process.arguments = decompress ? ["-d", "-c"] : ["-1", "-c"]
         let pipe = Pipe(); process.standardInput = source; process.standardOutput = pipe; process.standardError = FileHandle.nullDevice
         try process.run()
         defer { try? pipe.fileHandleForReading.close(); if process.isRunning { process.terminate(); process.waitUntilExit() } }
-        var produced = 0
+        var data = Data()
         while let chunk = try pipe.fileHandleForReading.read(upToCount: 65536), !chunk.isEmpty {
-            guard chunk.count <= byteBudget - produced else { throw MacroError.message("Not enough available memory to open this macro safely. Close other apps and retry; your file is unchanged.") }
-            produced += chunk.count; try destination.write(contentsOf: chunk)
+            guard chunk.count <= byteBudget - data.count else { throw MacroError.message("Not enough available memory to open this macro safely. Close other apps and retry; your file is unchanged.") }
+            data.append(chunk)
         }
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { throw MacroError.message("Could not read or write the compressed macro. Check the file and available disk space.") }
-        return try Data(contentsOf: output)
+        return data
     }
 }
