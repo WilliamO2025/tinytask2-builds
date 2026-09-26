@@ -77,6 +77,9 @@ final class ClassicEngine {
         if let tap { CFMachPortInvalidate(tap) }
         tap = nil; tapSource = nil; passiveMonitor = false
     }
+    private static func keyboardAuthorized(passive: Bool) -> Bool {
+        passive ? CGPreflightListenEventAccess() : AXIsProcessTrusted()
+    }
     private func suppressTappedEvent(_ type: CGEventType, _ event: CGEvent) -> Bool {
         let consumed = receive(type, event)
         return consumed && !passiveMonitor
@@ -84,7 +87,7 @@ final class ClassicEngine {
     func enableMonitor() throws {
         if let tap, CFMachPortIsValid(tap) {
             if !CGEvent.tapIsEnabled(tap: tap) { CGEvent.tapEnable(tap: tap, enable: true) }
-            if CGEvent.tapIsEnabled(tap: tap) { return }
+            if CGEvent.tapIsEnabled(tap: tap), Self.keyboardAuthorized(passive: passiveMonitor) { return }
         }
         removeMonitor(); monitorAttempts.removeAll()
         let types: [CGEventType] = [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp, .keyDown, .keyUp, .flagsChanged, .scrollWheel]
@@ -101,8 +104,10 @@ final class ClassicEngine {
             guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0) else { CFMachPortInvalidate(port); monitorAttempts.append(label + ": run-loop source unavailable"); continue }
             tap = port; tapSource = source; passiveMonitor = option == .listenOnly
             CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes); CGEvent.tapEnable(tap: port, enable: true)
-            if monitorReady { monitorAttempts.append(label + ": enabled"); return }
-            monitorAttempts.append(label + ": created but disabled"); removeMonitor()
+            // tapCreate may silently strip keyboard bits from the requested mask.
+            // A mouse-only port is not a working keyboard recorder or F10 stop hook.
+            if monitorReady && Self.keyboardAuthorized(passive: passiveMonitor) { monitorAttempts.append(label + ": enabled with keyboard authorization"); return }
+            monitorAttempts.append(label + (monitorReady ? ": keyboard access unavailable" : ": created but disabled")); removeMonitor()
         }
         throw MacroError.message("macOS rejected both recording monitors. Open Preferences > Copy permission diagnostics so the failed checks can be identified. No recording started.")
     }

@@ -184,10 +184,15 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         help.addButton(withTitle: "Open System Settings"); help.addButton(withTitle: "Show This App"); help.addButton(withTitle: "Copy diagnostics")
         let response = help.runModal()
         if response == .alertFirstButtonReturn {
-            let pane = !AXIsProcessTrusted() || monitoring ? "Privacy_Accessibility" : "Privacy_ListenEvent"
+            let pane = Self.permissionPane(playback: playback, accessibility: AXIsProcessTrusted(), monitoring: CGPreflightListenEventAccess())
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?" + pane) { NSWorkspace.shared.open(url) }
         } else if response == .alertSecondButtonReturn { NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL]) }
         else { copyPermissionDiagnostics() }
+    }
+    static func permissionPane(playback: Bool, accessibility: Bool, monitoring: Bool) -> String {
+        if !playback && !monitoring { return "Privacy_ListenEvent" }
+        if !accessibility { return "Privacy_Accessibility" }
+        return monitoring ? "Privacy_Accessibility" : "Privacy_ListenEvent"
     }
     @objc func copyPermissionDiagnostics() {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(engine.monitorDiagnostics, forType: .string)
@@ -225,6 +230,9 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if CommandLine.arguments.contains("--self-test") {
             do {
                 let original = MacroDocument(name: "Round trip", actions: [MacroAction(type: "mouseDown", delay: 0.25, x: 123, y: 456), MacroAction(type: "keyUp", key: 0)])
+                guard TinyTaskApp.permissionPane(playback: false, accessibility: false, monitoring: false) == "Privacy_ListenEvent",
+                      TinyTaskApp.permissionPane(playback: true, accessibility: false, monitoring: false) == "Privacy_Accessibility",
+                      TinyTaskApp.permissionPane(playback: false, accessibility: true, monitoring: false) == "Privacy_ListenEvent" else { throw MacroError.message("Permission help opened the wrong settings pane") }
                 try ClassicEngine.testMonitorCallbacks()
                 try ClassicEngine.testPreciseRecording()
                 try ClassicEngine.testLongRecording()
