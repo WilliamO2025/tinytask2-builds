@@ -49,6 +49,8 @@ final class ClassicEngine {
     private var timer: Timer?
     private var lastRecord = 0.0, recordStart = 0.0, lastMove = 0.0
     private var started = 0.0, pausedAt = 0.0, due = 0.0
+    private var preparedDisplays: [CGRect] = []
+    private var displayLayout: [CGRect] { NSScreen.screens.compactMap { screen in (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber).map { CGDisplayBounds(CGDirectDisplayID($0.uint32Value)) } } }
     private var preparedData: Data?
     private var preparedSpeed = 0.0
     private var packets: [[CGEvent]] = []
@@ -126,10 +128,10 @@ final class ClassicEngine {
         guard !document.actions.isEmpty, speed.isFinite, (0.01...1000).contains(speed), (1...1_000_000).contains(loops) else { throw MacroError.message("Choose a nonempty macro, speed 0.01–1000x and loops 1–1,000,000.") }
         guard !document.actions.contains(where: { ["keyDown", "keyUp"].contains($0.type) && [recordKey, playKey, stopKey].contains($0.key) }) else { throw MacroError.message("This macro contains a control hotkey. Change the recording/playback hotkeys first.") }
         guard CGEventSource.flagsState(.combinedSessionState).intersection([.maskShift, .maskControl, .maskAlternate, .maskCommand]).isEmpty else { throw MacroError.message("Release modifier keys before playback.") }
-        if preparedData != (try document.data()) || preparedSpeed != speed { try prepare(document, speed: speed) }
+        if preparedData != (try document.data()) || preparedSpeed != speed || preparedDisplays != displayLayout { try prepare(document, speed: speed) }
         macro = document; self.speed = speed; self.loops = loops; self.continuous = continuous; index = 0; loop = 0
         started = synchronizedStart ?? ProcessInfo.processInfo.systemUptime; due = offsets[0]; setState("Playing")
-        timer = Timer(timeInterval: 0.005, repeats: true) { [weak self] _ in self?.tick() }; RunLoop.main.add(timer!, forMode: .common)
+        scheduleNext()
     }
     func prepare(_ document: MacroDocument, speed: Double) throws {
         guard !busy else { throw MacroError.message("Stop the current task first.") }
@@ -142,11 +144,19 @@ final class ClassicEngine {
         var nextPackets: [[CGEvent]] = []
         for action in document.actions { nextPackets.append(try events(action)); track(action) }
         offsets = nextOffsets; loopDuration = original / speed; packets = nextPackets
-        preparedData = try document.data(); preparedSpeed = speed
+        preparedData = try document.data(); preparedSpeed = speed; preparedDisplays = displayLayout
+    }
+    private func scheduleNext() {
+        timer?.invalidate()
+        guard state == "Playing" else { return }
+        let wait = max(0.001, min(0.05, started + due - ProcessInfo.processInfo.systemUptime))
+        timer = Timer(timeInterval: wait, repeats: false) { [weak self] _ in self?.tick() }
+        timer!.tolerance = 0.0001; RunLoop.main.add(timer!, forMode: .common)
     }
     private func tick() {
         guard state == "Playing" else { return }
         do {
+            guard preparedDisplays == displayLayout else { throw MacroError.message("Display layout changed. Playback stopped; prepare it again.") }
             var burst = 0
             while ProcessInfo.processInfo.systemUptime - started >= due && burst < 64 {
                 let a = macro.actions[index]
@@ -158,6 +168,7 @@ final class ClassicEngine {
                 }
                 due = Double(loop) * loopDuration + offsets[index]
             }
+            scheduleNext()
         } catch { stop(); failed?(error.localizedDescription) }
     }
     private func id(_ a: MacroAction) -> String { (a.type.hasPrefix("key") || a.type == "flags") ? "key:\(a.key)" : "mouse:\(a.button)" }
@@ -175,7 +186,7 @@ final class ClassicEngine {
     func pauseResume() {
         if state == "Playing" { pausedAt = ProcessInfo.processInfo.systemUptime; timer?.fireDate = .distantFuture; setState("Paused"); release(clear: false) }
         else if state == "Paused" {
-            do { for a in Self.resumeOrder(Array(held.values)) { try send(a) }; started += ProcessInfo.processInfo.systemUptime - pausedAt; timer?.fireDate = Date(); setState("Playing") }
+            do { for a in Self.resumeOrder(Array(held.values)) { try send(a) }; started += ProcessInfo.processInfo.systemUptime - pausedAt; setState("Playing"); scheduleNext() }
             catch { stop(); failed?(error.localizedDescription) }
         }
     }

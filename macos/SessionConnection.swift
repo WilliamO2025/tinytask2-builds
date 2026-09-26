@@ -40,7 +40,8 @@ final class MacSessionConnection {
         guard let url = URL(string: endpoint), let host = url.host, url.path == "/session", url.user == nil, url.password == nil,
               url.scheme == "wss" || (url.scheme == "ws" && ["localhost", "127.0.0.1", "::1"].contains(host)) else { throw MacroError.message("Use a secure wss:// server ending in /session. Local tests may use ws://localhost.") }
         guard !username.trimmingCharacters(in: .whitespaces).isEmpty else { throw MacroError.message("Choose a username first.") }
-        let port = url.port.map { ":\($0)" } ?? ""
+        let defaultPort = url.scheme == "wss" ? 443 : 80
+        let port = url.port.flatMap { $0 == defaultPort ? nil : ":\($0)" } ?? ""
         let authority = "\(url.scheme!)://\(host.contains(":") ? "[\(host)]" : host)\(port)"
         let next = URLSession.shared.webSocketTask(with: url); next.maximumMessageSize = 16384
         socket = next; next.resume(); lastReceived = Self.now; receive(next)

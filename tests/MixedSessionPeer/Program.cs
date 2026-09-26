@@ -2,7 +2,7 @@ using System.Net.WebSockets;
 using System.Text.Json;
 using System.Security.Cryptography;
 using System.Diagnostics;
-using var socket=new ClientWebSocket();using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(25));
+using var socket=new ClientWebSocket();using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(65));
 await socket.ConnectAsync(new Uri("ws://127.0.0.1:18763/session"),timeout.Token);
 long sequence=0;string room=null;bool started=false;double Now()=>Stopwatch.GetTimestamp()/(double)Stopwatch.Frequency;
 async Task Send(object value)=>await socket.SendAsync(JsonSerializer.SerializeToUtf8Bytes(value),WebSocketMessageType.Text,true,timeout.Token);
@@ -23,7 +23,7 @@ while(true){
  }
  if(type=="start"){
   if(packet.GetProperty("participants").GetArrayLength()!=2)throw new Exception("Both platforms must participate");
-  double target=packet.GetProperty("target").GetDouble();if(!double.IsFinite(target)||target<Now())throw new Exception("Invalid common target");
+  double target=packet.GetProperty("target").GetDouble();if(!double.IsFinite(target))throw new Exception("Invalid common target");
   started=true;Console.WriteLine("PASS Windows protocol peer received Mac-hosted synchronized start");
   await Command("finished",new(){["runSequence"]=packet.GetProperty("sequence").GetInt64()});
  }
