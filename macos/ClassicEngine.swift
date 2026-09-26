@@ -85,7 +85,11 @@ final class ClassicEngine {
     }
     private func receive(_ type: CGEventType, _ event: CGEvent) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            stop(); if let tap { CGEvent.tapEnable(tap: tap, enable: true) }; failed?("Input monitoring was interrupted. The task stopped; start a new recording rather than using an incomplete one."); return false
+            if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+            DispatchQueue.main.async { [weak self] in
+                self?.stop(); self?.failed?("Input monitoring was interrupted. The task stopped; start a new recording rather than using an incomplete one.")
+            }
+            return false
         }
         if event.getIntegerValueField(.eventSourceUserData) == marker { return false }
         let key = UInt16(clamping: event.getIntegerValueField(.keyboardEventKeycode))
@@ -260,6 +264,9 @@ final class ClassicEngine {
         defer { try? FileManager.default.removeItem(at: url) }
         let data = try document.data(); try MacroFiles.write(data, to: url)
         guard try MacroDocument.load(MacroFiles.read(url)) == document else { throw MacroError.message("Long macro round trip changed events") }
+        var limited = false
+        do { _ = try MacroFiles.read(url, byteBudget: 1024) } catch { limited = true }
+        guard limited else { throw MacroError.message("Compressed expansion budget ignored") }
         let engine = ClassicEngine(); try engine.prepare(document, speed: 1)
         guard engine.preparedPacketCapacity == 512 else { throw MacroError.message("Prepared event cache grew beyond 512") }
         // Check the entire native ring twice without posting a single event.
@@ -274,7 +281,7 @@ final class ClassicEngine {
             }
         }
         let bytes = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        print("Long recording verified: \(document.actions.count) events, JSON \(data.count) bytes, compressed \(bytes) bytes; native cache 512; two replays; no input posted.")
+        fputs("Long recording verified: \(document.actions.count) events, JSON \(data.count) bytes, compressed \(bytes) bytes; native cache 512; two replays; no input posted.\n", stderr)
     }
     static func testPreciseRecording() throws {
         let engine = ClassicEngine(); engine.state = "Recording"; engine.recordStart = ProcessInfo.processInfo.systemUptime
@@ -290,11 +297,27 @@ final class ClassicEngine {
 
 // macOS ships gzip. File handles avoid shell quoting, pipe deadlocks and extra runtimes.
 enum MacroFiles {
-    static func read(_ url: URL) throws -> Data {
+    private static func importByteBudget() -> Int {
+        var statistics = vm_statistics64_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &statistics) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count) }
+        }
+        let available = result == KERN_SUCCESS ? (UInt64(statistics.free_count) + UInt64(statistics.inactive_count)) * UInt64(vm_kernel_page_size) : ProcessInfo.processInfo.physicalMemory / 2
+        return Int(min(UInt64(Int.max), available / 8))
+    }
+    static func read(_ url: URL, byteBudget: Int? = nil) throws -> Data {
         let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
         let header = try handle.read(upToCount: 2)
-        if header == Data([0x1f, 0x8b]) { return try gzip(url, decompress: true) }
-        return try Data(contentsOf: url)
+        let budget = byteBudget ?? importByteBudget()
+        if header == Data([0x1f, 0x8b]) { return try gzip(url, decompress: true, byteBudget: budget) }
+        try handle.seek(toOffset: 0)
+        var data = Data()
+        while let chunk = try handle.read(upToCount: 65536), !chunk.isEmpty {
+            guard chunk.count <= budget - data.count else { throw MacroError.message("Not enough available memory to open this macro safely. Close other apps and retry; your file is unchanged.") }
+            data.append(chunk)
+        }
+        return data
     }
     static func write(_ data: Data, to url: URL) throws {
         if url.pathExtension.lowercased() != "ttmacro" { try data.write(to: url, options: .atomic); return }
@@ -303,15 +326,22 @@ enum MacroFiles {
         try data.write(to: input, options: .atomic)
         try gzip(input, decompress: false).write(to: url, options: .atomic)
     }
-    private static func gzip(_ input: URL, decompress: Bool) throws -> Data {
+    private static func gzip(_ input: URL, decompress: Bool, byteBudget: Int = Int.max) throws -> Data {
         let output = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: output) }
         guard FileManager.default.createFile(atPath: output.path, contents: nil) else { throw MacroError.message("Could not create macro temporary file.") }
         let source = try FileHandle(forReadingFrom: input), destination = try FileHandle(forWritingTo: output)
         defer { try? source.close(); try? destination.close() }
         let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/bin/gzip"); process.arguments = decompress ? ["-d", "-c"] : ["-1", "-c"]
-        process.standardInput = source; process.standardOutput = destination; process.standardError = FileHandle.nullDevice
-        try process.run(); process.waitUntilExit()
+        let pipe = Pipe(); process.standardInput = source; process.standardOutput = pipe; process.standardError = FileHandle.nullDevice
+        try process.run()
+        defer { try? pipe.fileHandleForReading.close(); if process.isRunning { process.terminate(); process.waitUntilExit() } }
+        var produced = 0
+        while let chunk = try pipe.fileHandleForReading.read(upToCount: 65536), !chunk.isEmpty {
+            guard chunk.count <= byteBudget - produced else { throw MacroError.message("Not enough available memory to open this macro safely. Close other apps and retry; your file is unchanged.") }
+            produced += chunk.count; try destination.write(contentsOf: chunk)
+        }
+        process.waitUntilExit()
         guard process.terminationStatus == 0 else { throw MacroError.message("Could not read or write the compressed macro. Check the file and available disk space.") }
         return try Data(contentsOf: output)
     }
