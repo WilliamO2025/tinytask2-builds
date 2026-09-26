@@ -64,24 +64,47 @@ final class ClassicEngine {
     private var held: [String: MacroAction] = [:]
     private let marker: Int64 = 0x545432
     var busy: Bool { state != "Ready" }
-    var monitorReady: Bool { tap != nil }
+    private(set) var passiveMonitor = false
+    private(set) var monitorAttempts: [String] = []
+    var monitorReady: Bool { tap.map { CFMachPortIsValid($0) && CGEvent.tapIsEnabled(tap: $0) } ?? false }
+    var monitorNotice: String { passiveMonitor ? "Recording monitor ready. Control hotkeys also reach the focused app." : "Input monitor ready." }
+    var monitorDiagnostics: String {
+        "TinyTask build: \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "unknown")\nmacOS: \(ProcessInfo.processInfo.operatingSystemVersionString)\nApp: \(Bundle.main.bundleURL.path)\nBundle ID: \(Bundle.main.bundleIdentifier ?? "unknown")\nAccessibility: \(AXIsProcessTrusted())\nInput Monitoring: \(CGPreflightListenEventAccess())\nPlayback access: \(CGPreflightPostEventAccess())\nMonitor enabled: \(monitorReady)\nPassive mode: \(passiveMonitor)\nAttempts: \(monitorAttempts.joined(separator: "; "))"
+    }
     private func setState(_ value: String) { state = value; changed?() }
+    private func removeMonitor() {
+        if let source = tapSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
+        if let tap { CFMachPortInvalidate(tap) }
+        tap = nil; tapSource = nil; passiveMonitor = false
+    }
+    private func suppressTappedEvent(_ type: CGEventType, _ event: CGEvent) -> Bool {
+        let consumed = receive(type, event)
+        return consumed && !passiveMonitor
+    }
     func enableMonitor() throws {
-        if let tap {
+        if let tap, CFMachPortIsValid(tap) {
             if !CGEvent.tapIsEnabled(tap: tap) { CGEvent.tapEnable(tap: tap, enable: true) }
             if CGEvent.tapIsEnabled(tap: tap) { return }
-            throw MacroError.message("The input monitor is disabled. Fully quit and reopen this copy after approving access.")
         }
-        // The real filtering tap is authoritative; preflight flags can lag a permission change.
+        removeMonitor(); monitorAttempts.removeAll()
         let types: [CGEventType] = [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp, .keyDown, .keyUp, .flagsChanged, .scrollWheel]
         let mask = types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
-        guard let port = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: mask, callback: { _, type, event, context in
-            guard let context else { return Unmanaged.passUnretained(event) }
-            let engine = Unmanaged<ClassicEngine>.fromOpaque(context).takeUnretainedValue()
-            return engine.receive(type, event) ? nil : Unmanaged.passUnretained(event)
-        }, userInfo: Unmanaged.passUnretained(self).toOpaque()) else { throw MacroError.message("macOS could not create the input monitor. Check both permissions and restart the app.") }
-        tap = port; tapSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), tapSource, .commonModes); CGEvent.tapEnable(tap: port, enable: true)
+        // Active taps suppress our control keys. A passive tap records without
+        // modifying input and remains usable when only monitoring is authorized.
+        for option: CGEventTapOptions in [.defaultTap, .listenOnly] {
+            let label = option == .listenOnly ? "Passive recording" : "Active hotkey filtering"
+            guard let port = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: option, eventsOfInterest: mask, callback: { _, type, event, context in
+                guard let context else { return Unmanaged.passUnretained(event) }
+                let engine = Unmanaged<ClassicEngine>.fromOpaque(context).takeUnretainedValue()
+                return engine.suppressTappedEvent(type, event) ? nil : Unmanaged.passUnretained(event)
+            }, userInfo: Unmanaged.passUnretained(self).toOpaque()) else { monitorAttempts.append(label + ": creation rejected"); continue }
+            guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0) else { CFMachPortInvalidate(port); monitorAttempts.append(label + ": run-loop source unavailable"); continue }
+            tap = port; tapSource = source; passiveMonitor = option == .listenOnly
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes); CGEvent.tapEnable(tap: port, enable: true)
+            if monitorReady { monitorAttempts.append(label + ": enabled"); return }
+            monitorAttempts.append(label + ": created but disabled"); removeMonitor()
+        }
+        throw MacroError.message("macOS rejected both recording monitors. Open Preferences > Copy permission diagnostics so the failed checks can be identified. No recording started.")
     }
     private func receive(_ type: CGEventType, _ event: CGEvent) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
@@ -292,7 +315,19 @@ final class ClassicEngine {
         guard engine.recording.actions.count == 5, engine.recording.actions.last?.x == 104 else { throw MacroError.message("Fine movement was discarded") }
         engine.state = "Ready"
     }
-    func shutdown() { stop(); if let source = tapSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }; if let tap { CFMachPortInvalidate(tap) }; tap = nil; tapSource = nil }
+    static func testMonitorCallbacks() throws {
+        let engine = ClassicEngine()
+        guard let key = CGEvent(keyboardEventSource: nil, virtualKey: engine.stopKey, keyDown: false), let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: CGPoint(x: 101, y: 100), mouseButton: .left) else { throw MacroError.message("Monitor test events unavailable") }
+        guard engine.suppressTappedEvent(.keyUp, key) else { throw MacroError.message("Active monitor lost control-key filtering") }
+        engine.passiveMonitor = true
+        guard !engine.suppressTappedEvent(.keyUp, key) else { throw MacroError.message("Passive monitor suppressed a key") }
+        engine.state = "Recording"; engine.recordStart = ProcessInfo.processInfo.systemUptime
+        guard !engine.suppressTappedEvent(.mouseMoved, move), engine.recording.actions.count == 1, engine.recording.actions[0].x == 101 else { throw MacroError.message("Passive monitor lost fine movement") }
+        engine.state = "Ready"; engine.removeMonitor()
+        guard !engine.monitorReady, !engine.passiveMonitor else { throw MacroError.message("Monitor cleanup failed") }
+    }
+    func shutdown() { stop(); removeMonitor() }
+
 }
 
 // macOS ships gzip. File handles avoid shell quoting, pipe deadlocks and extra runtimes.

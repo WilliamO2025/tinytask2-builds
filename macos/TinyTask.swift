@@ -103,7 +103,7 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         captureTimer?.invalidate(); captureTimer = nil
         if wasRecording { captureTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             guard let self else { return }
-            self.status.stringValue = "Recording: \(self.engine.capturedMoves) moves, \(self.engine.capturedClicks) clicks, \(self.engine.capturedKeys) keys. F8 finishes."
+            self.status.stringValue = "Recording: \(self.engine.capturedMoves) moves, \(self.engine.capturedClicks) clicks, \(self.engine.capturedKeys) keys. F8 finishes." + (self.engine.passiveMonitor ? " Hotkeys also reach the focused app." : "")
         } }
         sessions?.engineChanged()
         recordButton.title = wasRecording ? "Finish" : "● Record"; recordButton.isEnabled = mode.indexOfSelectedItem == 0 && ["Ready", "Recording"].contains(engine.state)
@@ -115,7 +115,7 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if engine.state == "Recording" { engine.stop(); return }
         guard mode.indexOfSelectedItem == 0 else { status.stringValue = "Switch to Classic to record."; return }
         guard prepareInput(playback: false) else { return }
-        do { try engine.record() } catch { status.stringValue = error.localizedDescription }
+        do { try engine.record(); if engine.passiveMonitor { status.stringValue = engine.monitorNotice + " F8 finishes." } } catch { status.stringValue = error.localizedDescription }
     }
     @objc func playPause() {
         if ["Playing", "Paused"].contains(engine.state) { engine.pauseResume(); return }
@@ -145,12 +145,12 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     // Permission dialogs are asynchronous. Never start recording/playback as a
     // side effect of approval; the user explicitly clicks the action again.
-    // Recording needs the filtering tap; posting is required only for playback.
+    // Recording accepts active or passive monitoring; posting is only for playback.
     func refreshPermissions(playback: Bool = false) -> Bool {
         guard !playback || CGPreflightPostEventAccess() else { return false }
         do {
             try engine.enableMonitor(); permissionsPending = false
-            status.stringValue = "Permissions ready. Click Record or Play to begin."
+            status.stringValue = engine.monitorNotice + " Click Record or Play to begin."
             return true
         } catch { status.stringValue = error.localizedDescription; return false }
     }
@@ -168,7 +168,9 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         permissionsPending = true; defaults.set(true, forKey: "permissionRequestShown")
         // Request only missing access. Never start input as a side effect of consent.
         let accessibility = AXIsProcessTrusted(), monitoring = CGPreflightListenEventAccess()
-        if !accessibility {
+        if !playback && !monitoring {
+            _ = CGRequestListenEventAccess()
+        } else if !accessibility {
             _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
         } else if !monitoring {
             _ = CGRequestListenEventAccess()
@@ -179,12 +181,17 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         status.stringValue = "Access is not ready. See the permission help for this copy of TinyTask."
         let help = NSAlert(); help.messageText = "Allow this copy of TinyTask 2.0"
         help.informativeText = "Running app: \(Bundle.main.bundleURL.path)\n\nAccessibility: \(AXIsProcessTrusted() ? "Allowed" : "Not available")\nInput Monitoring: \(CGPreflightListenEventAccess() ? "Allowed" : "Not available")\nPlayback access: \(CGPreflightPostEventAccess() ? "Allowed" : "Not available")\n\nMove the app to Applications before granting access. If the switches are already on, fully quit TinyTask, remove the old entry using the minus button in System Settings, then add this copy and reopen it. Ad-hoc signed updates may need approval again. macOS requires you to approve access; the app cannot grant itself permission."
-        help.addButton(withTitle: "Open System Settings"); help.addButton(withTitle: "Show This App"); help.addButton(withTitle: "Close")
+        help.addButton(withTitle: "Open System Settings"); help.addButton(withTitle: "Show This App"); help.addButton(withTitle: "Copy diagnostics")
         let response = help.runModal()
         if response == .alertFirstButtonReturn {
             let pane = !AXIsProcessTrusted() || monitoring ? "Privacy_Accessibility" : "Privacy_ListenEvent"
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?" + pane) { NSWorkspace.shared.open(url) }
         } else if response == .alertSecondButtonReturn { NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL]) }
+        else { copyPermissionDiagnostics() }
+    }
+    @objc func copyPermissionDiagnostics() {
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(engine.monitorDiagnostics, forType: .string)
+        status.stringValue = "Permission diagnostics copied. They contain the app path and access checks, not recorded input."
     }
     @objc func preferences() {
         guard !engine.busy else { return }
@@ -194,7 +201,7 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let record = NSPopUpButton(), play = NSPopUpButton(), theme = NSPopUpButton()
         record.addItems(withTitles: keys.map { $0.0 }); play.addItems(withTitles: keys.map { $0.0 }); record.selectItem(at: keys.firstIndex { $0.1 == engine.recordKey } ?? 7); play.selectItem(at: keys.firstIndex { $0.1 == engine.playKey } ?? 8)
         theme.addItems(withTitles: ["System", "Light", "Dark"]); theme.selectItem(at: defaults.integer(forKey: "theme"))
-        let controls = NSStackView(views: [top, row([NSTextField(labelWithString: "Recording hotkey"), record]), row([NSTextField(labelWithString: "Playback hotkey"), play]), row([NSTextField(labelWithString: "Appearance"), theme]), button("Enable permissions", #selector(permissions)), button("Open saved macros folder", #selector(savedMacros)), button("Advanced → Diagnostics", #selector(diagnostics))]); controls.orientation = .vertical; controls.alignment = .leading; controls.spacing = 12; controls.frame = NSRect(x: 0, y: 0, width: 390, height: 280); alert.accessoryView = controls; alert.addButton(withTitle: "Save"); alert.addButton(withTitle: "Cancel")
+        let controls = NSStackView(views: [top, row([NSTextField(labelWithString: "Recording hotkey"), record]), row([NSTextField(labelWithString: "Playback hotkey"), play]), row([NSTextField(labelWithString: "Appearance"), theme]), button("Enable permissions", #selector(permissions)), button("Copy permission diagnostics", #selector(copyPermissionDiagnostics)), button("Open saved macros folder", #selector(savedMacros)), button("Advanced → Diagnostics", #selector(diagnostics))]); controls.orientation = .vertical; controls.alignment = .leading; controls.spacing = 12; controls.frame = NSRect(x: 0, y: 0, width: 390, height: 320); alert.accessoryView = controls; alert.addButton(withTitle: "Save"); alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn {
             guard record.indexOfSelectedItem != play.indexOfSelectedItem else { status.stringValue = "Choose different hotkeys for recording and playback."; return }
             engine.recordKey = keys[record.indexOfSelectedItem].1; engine.playKey = keys[play.indexOfSelectedItem].1; defaults.set(Int(engine.recordKey), forKey: "recordKey"); defaults.set(Int(engine.playKey), forKey: "playKey"); defaults.set(top.state == .on, forKey: "alwaysOnTop"); defaults.set(theme.indexOfSelectedItem, forKey: "theme"); window.level = top.state == .on ? .floating : .normal; saveSettings(); applyAppearance()
@@ -218,6 +225,7 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if CommandLine.arguments.contains("--self-test") {
             do {
                 let original = MacroDocument(name: "Round trip", actions: [MacroAction(type: "mouseDown", delay: 0.25, x: 123, y: 456), MacroAction(type: "keyUp", key: 0)])
+                try ClassicEngine.testMonitorCallbacks()
                 try ClassicEngine.testPreciseRecording()
                 try ClassicEngine.testLongRecording()
                 try ClassicEngine().prepare(original, speed: 1)
