@@ -268,7 +268,7 @@ final class ClassicEngine {
             for i in document.actions.indices {
                 let slot = i % engine.packets.count
                 if document.actions[i].type == "move" {
-                    guard engine.packets[slot].last?.type == .rightMouseDragged, engine.packets[slot].last?.location.x == document.actions[i].x else { throw MacroError.message("Look-ahead lost drag type or point") }
+                    guard engine.packets[slot].last?.type == .rightMouseDragged, engine.packets[slot].last?.location.x == CGFloat(document.actions[i].x) else { throw MacroError.message("Look-ahead lost drag type or point") }
                 }
                 if engine.nextPrepared < document.actions.count { engine.packets[slot] = try engine.prepareNext(document) }
             }
