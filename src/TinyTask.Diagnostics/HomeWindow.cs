@@ -51,6 +51,7 @@ internal sealed class HomeWindow : Window
     private HwndSource? source;
     private nint hwnd;
     private bool hotkeysReady,wasRecording;
+    private readonly System.Windows.Threading.DispatcherTimer captureTimer=new(){Interval=TimeSpan.FromMilliseconds(200)};
     private string LibraryDirectory=>Path.Combine(MainWindow.DataDirectory,"Macros");
     private readonly System.Windows.Threading.DispatcherTimer focusTimer=new(){Interval=TimeSpan.FromSeconds(1)};
     internal HomeWindow()
@@ -73,6 +74,7 @@ internal sealed class HomeWindow : Window
         Get<Button>("Record").Click+=(_,_)=>ToggleRecord();Get<Button>("Play").Click+=(_,_)=>PlayMacro();Get<Button>("Pause").Click+=(_,_)=>PauseMacro();
         Get<Button>("Stop").Click+=(_,_)=>StopAll();
         engine.Disarmed+=()=>{if(sessionWindow!=null)_=sessionWindow.SetNotReady();};
+        captureTimer.Tick+=(_,_)=>Status($"Recording: {engine.Recording.Actions.Count(a=>a.Type=="move")} moves, {engine.Recording.Actions.Count(a=>a.Type=="mouseDown")} clicks, {engine.Recording.Actions.Count(a=>a.Type=="keyDown")} keys. Use another app; F8 finishes.");
         engine.Changed+=EngineChanged;engine.Failed+=message=>Dispatcher.BeginInvoke(()=>Status(message));
         engine.IsControlKey=key=>key==121||Bindings.Any(b=>b.Matches(key,Shortcut.CurrentModifiers()));
         engine.IsStopKey=key=>new Shortcut(prefs.StopKey,prefs.StopModifiers).Matches(key,Shortcut.CurrentModifiers());
@@ -96,14 +98,14 @@ internal sealed class HomeWindow : Window
         SourceInitialized+=(_,_)=>{hwnd=new WindowInteropHelper(this).Handle;source=HwndSource.FromHwnd(hwnd);source.AddHook(WndProc);RegisterControls();UiTheme.Caption(this,prefs.Dark);};
         Loaded+=(_,_)=>{string recovery=Path.Combine(MainWindow.DataDirectory,"last-recording.json");if(File.Exists(recovery))try{LoadDocument(File.ReadAllText(recovery),"Last recording");}catch(Exception e){Status("Recovery could not open: "+e.Message);}};
         Closing+=(_,_)=>StopAll();
-        Closed+=(_,_)=>{focusTimer.Stop();engine.Dispose();diagnostics?.Close();SavePreferences();UnregisterControls();source?.RemoveHook(WndProc);tray.Dispose();};
+        Closed+=(_,_)=>{focusTimer.Stop();captureTimer.Stop();engine.Dispose();diagnostics?.Close();SavePreferences();UnregisterControls();source?.RemoveHook(WndProc);tray.Dispose();};
     }
     private Shortcut[] Bindings=>new[]{new Shortcut(prefs.RecordKey,prefs.RecordModifiers),new Shortcut(prefs.PlayKey,prefs.PlayModifiers),new Shortcut(prefs.StopKey,prefs.StopModifiers)};
     private void StopAll(){engine.Stop();diagnostics?.EmergencyStop();if(sessionWindow!=null)_=sessionWindow.SetNotReady();}
     private string PrepareSessionTask()
     {
         if(macroJson==null)throw new InvalidOperationException("Record or open a macro first.");
-        if(!hotkeysReady)throw new InvalidOperationException("Free the playback and emergency shortcuts first.");
+        
         sessionSettings=CurrentPlaybackSettings();sessionMacro=MacroDocument.Parse(macroJson);engine.Prepare(sessionMacro,sessionSettings.Speed,true);return sessionMacro.Name;
     }
     private async System.Threading.Tasks.Task PlaySessionTask(double target)
@@ -122,12 +124,12 @@ internal sealed class HomeWindow : Window
         bool record=Native.RegisterHotKey(hwnd,31,0x4000|prefs.RecordModifiers,(uint)prefs.RecordKey),play=Native.RegisterHotKey(hwnd,32,0x4000|prefs.PlayModifiers,(uint)prefs.PlayKey),stop=Native.RegisterHotKey(hwnd,33,0x4000|prefs.StopModifiers,(uint)prefs.StopKey);
         if(prefs.StopKey!=121||prefs.StopModifiers!=0)stop=Native.RegisterHotKey(hwnd,34,0x4000,121)&&stop;
         hotkeysReady=record&&play&&stop;
-        if(!hotkeysReady)Status("A hotkey is in use. Change recording/playback keys in Preferences; F10 must be available.");
+        if(!hotkeysReady)Status("A shortcut is used by another app. Toolbar buttons still work; F10 stops through the input hook. Change shortcuts in Preferences.");
         EngineChanged();
     }
     private void ToggleRecord()
     {
-        try {if(engine.State=="Recording"){engine.Stop();return;}if(Get<ComboBox>("Mode").SelectedIndex!=0)throw new InvalidOperationException("Switch to Classic to record. Advanced tools are experimental.");if(!hotkeysReady)throw new InvalidOperationException("Free the selected hotkeys first; F10 is the emergency stop.");if(engine.IsBusy)return;if(engine.Armed)StopAll();SavePreferences();engine.Record();}
+        try {if(engine.State=="Recording"){engine.Stop();return;}if(Get<ComboBox>("Mode").SelectedIndex!=0)throw new InvalidOperationException("Switch to Classic to record. Advanced tools are experimental.");if(engine.IsBusy)return;if(engine.Armed)StopAll();SavePreferences();engine.Record();}
         catch(Exception e){Status(e.Message);}
     }
     private async void PlayMacro()
@@ -140,8 +142,8 @@ internal sealed class HomeWindow : Window
             if(Get<ComboBox>("Mode").SelectedIndex!=0)throw new InvalidOperationException("Switch to Classic to play. Background playback is not available.");
             using var preview=macroJson==null?null:JsonDocument.Parse(macroJson);
             if(preview==null || preview.RootElement.GetProperty("actions").GetArrayLength()==0){Status("No recording available. Record or open a macro first.");return;}
-            if(!hotkeysReady)throw new InvalidOperationException("Playback needs the configured hotkeys and F10 stop to be available.");
             if(macroJson==null)throw new InvalidOperationException("Record or open a macro first.");
+            if(!MacroDocument.Parse(macroJson).Actions.Any(a=>a.Type!="delay"))throw new InvalidOperationException("This recording contains only waiting time. Record actions in another application, then press F8 to finish.");
             var profile=CurrentPlaybackSettings();double rate=profile.Speed;int count=profile.Loops;
             SavePreferences();await engine.Play(MacroDocument.Parse(macroJson),rate,count,prefs.Continuous);
         }catch(Exception e){engine.Stop();Status(e.Message);}
@@ -149,16 +151,19 @@ internal sealed class HomeWindow : Window
     private void PauseMacro(){try{engine.PauseResume();}catch(Exception e){engine.Stop();Status(e.Message);}}
     private void EngineChanged()
     {
-        if(wasRecording && engine.State!="Recording")
+        bool finished=wasRecording&&engine.State!="Recording";
+        wasRecording=engine.State=="Recording";
+        bool empty=finished&&!engine.Recording.Actions.Any(a=>a.Type!="delay");
+        if(finished&&!empty)
         {
             string json=new PlaybackSettings(prefs.Speed,prefs.Loops,prefs.Continuous).Write(JsonSerializer.Serialize(engine.Recording,MacroDocument.Json));LoadDocument(json,engine.Recording.Name);
             try{Directory.CreateDirectory(LibraryDirectory);SaveCopy(Path.Combine(MainWindow.DataDirectory,"last-recording.json"));SaveCopy(Path.Combine(LibraryDirectory,engine.Recording.Name+"-"+DateTime.Now.ToString("fff")+".json"));}catch(Exception e){Dispatcher.BeginInvoke(()=>Status("Recording kept in memory; auto-save failed: "+e.Message));}
         }
-        wasRecording=engine.State=="Recording";
-        Status(engine.State);Get<Button>("Record").Content=wasRecording?"Finish":"●  Record";
+        if(wasRecording)captureTimer.Start();else captureTimer.Stop();
+        Status(empty?"No input captured. Click Record, use another application, then press F8 to finish. Your previous macro was kept.":engine.State);Get<Button>("Record").Content=wasRecording?"Finish":"●  Record";
         bool classic=Get<ComboBox>("Mode").SelectedIndex==0;
         Get<ComboBox>("Mode").IsEnabled=!engine.IsBusy;
-        Get<Button>("Record").IsEnabled=classic && hotkeysReady && engine.State is "Ready" or "Recording";
+        Get<Button>("Record").IsEnabled=classic && engine.State is "Ready" or "Recording";
         Get<Button>("Play").IsEnabled=classic && engine.State is "Ready" or "Paused";
         Get<Button>("Pause").IsEnabled=engine.State is "Playing" or "Paused";
         Get<Button>("Pause").Content=engine.State=="Paused"?"Resume":"Ⅱ  Pause";
@@ -295,6 +300,27 @@ internal sealed class HomeWindow : Window
     }
     internal void Theme(bool dark)=>UiTheme.Apply(this,dark);
     internal static ResourceDictionary CreateStyles()=>UiTheme.Styles();
+    internal async System.Threading.Tasks.Task<bool> TestRecordFinishPlay(Target target)
+    {
+        Get<ComboBox>("Mode").SelectedIndex=0;Get<CheckBox>("Continuous").IsChecked=false;
+        engine.AcceptInjectedForTest=true;
+        Native.SetForegroundWindow(target.Handle);await System.Threading.Tasks.Task.Delay(100);
+        if(Native.GetForegroundWindow()!=target.Handle)throw new InvalidOperationException("Recording fixture must be focused.");
+        var point=new Native.Point(80,80);Native.ClientToScreen(target.Handle,ref point);
+        Get<Button>("Record").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        foreach(var type in new[]{"move","mouseDown","mouseUp"}){await System.Threading.Tasks.Task.Run(()=>ClassicEngine.Send(new(){Type=type,X=point.X,Y=point.Y}));await System.Threading.Tasks.Task.Delay(35);}
+        Get<Button>("Record").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        bool saved=macroJson!=null&&MacroDocument.Parse(macroJson).Actions.Any(a=>a.Type=="mouseDown");
+        string before=Native.Title(target.Handle);
+        Get<Button>("Play").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        for(int i=0;i<100&&engine.IsBusy;i++)await System.Threading.Tasks.Task.Delay(20);
+        bool replayed=before!=Native.Title(target.Handle)&&engine.State=="Ready";
+        string? previous=macroJson;
+        Get<Button>("Record").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Get<Button>("Record").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        bool preserved=previous==macroJson&&Get<TextBlock>("Status").Text.StartsWith("No input captured");
+        engine.AcceptInjectedForTest=false;return saved&&replayed&&preserved;
+    }
     internal bool TestEmptyPlay()
     {
         macroJson=null;EngineChanged();Get<Button>("Play").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

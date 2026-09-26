@@ -71,6 +71,7 @@ internal static class ClassicTests
             Check("Severe lateness stops instead of replaying backlog",lateStopped&&engine.State=="Ready"&&engine.PeakLatenessMilliseconds>=500);
             var clock=Stopwatch.StartNew();await engine.Play(new(){Actions=new(){new(){Type="delay",Delay=0.02}}},1,1,false,synchronizedStart:SessionConnection.Now+0.08);
             Check("Synchronized start anchors original delay",clock.Elapsed.TotalSeconds>=0.095);
+            var home=new HomeWindow();try{home.Show();await Task.Delay(100);Check("Toolbar Record Finish Play replays clicks and empty finish preserves previous macro",await home.TestRecordFinishPlay(target));}finally{home.Close();}
             bool rejected=false;try{MacroDocument.Parse("{\"actions\":[{\"type\":\"delay\",\"delay\":-1}]}");}catch(ArgumentException){rejected=true;}Check("Invalid delay rejected",rejected);
         }
         catch(Exception e){passed=false;results.Add(new{error=e.ToString()});}

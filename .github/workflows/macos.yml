@@ -15,6 +15,24 @@ jobs:
         env:
           BUILD_INPUT_LAB: '0'
         run: bash macos/build.sh
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Verify Mac and Windows session protocol interoperability
+        shell: bash
+        run: |
+          dotnet build src/TinyTask.SessionServer -o dist/session-server
+          dotnet build tests/MixedSessionPeer -o dist/session-peer
+          dotnet dist/session-server/TinyTask.SessionServer.dll --urls http://127.0.0.1:18763 --DataDirectory "$RUNNER_TEMP/session-test" > dist/session-server.log 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          sleep 2
+          dotnet dist/session-peer/MixedSessionPeer.dll > dist/session-peer.log 2>&1 &
+          peer=$!
+          xcrun swiftc -swift-version 5 -framework AppKit -framework ApplicationServices macos/ClassicEngine.swift macos/SessionConnection.swift macos/SessionChecks.swift -o dist/session-checks
+          dist/session-checks
+          wait "$peer"
+          cat dist/session-peer.log
       - uses: actions/upload-artifact@v4
         with:
           name: TinyTask2-macOS-user

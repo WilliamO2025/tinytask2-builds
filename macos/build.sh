@@ -25,7 +25,7 @@ build_app() {
   codesign --verify --strict "$app"
   ditto -c -k --sequesterRsrc --keepParent "$app" "$OUT/$name.zip"
 }
-build_app "TinyTask 2.0" TinyTask2 User-Info.plist "$ROOT/ClassicEngine.swift" "$ROOT/TinyTask.swift"
+build_app "TinyTask 2.0" TinyTask2 User-Info.plist "$ROOT/ClassicEngine.swift" "$ROOT/SessionConnection.swift" "$ROOT/SessionWindow.swift" "$ROOT/TinyTask.swift"
 "$OUT/TinyTask 2.0.app/Contents/MacOS/TinyTask2" --self-test > "$OUT/classic-self-test.json"
 "$OUT/TinyTask 2.0.app/Contents/MacOS/TinyTask2" --ui-smoke "$OUT/user-ui-light.png" light
 "$OUT/TinyTask 2.0.app/Contents/MacOS/TinyTask2" --ui-smoke "$OUT/user-ui-dark.png" dark

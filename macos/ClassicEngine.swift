@@ -49,6 +49,9 @@ final class ClassicEngine {
     private var timer: Timer?
     private var lastRecord = 0.0, recordStart = 0.0, lastMove = 0.0
     private var started = 0.0, pausedAt = 0.0, due = 0.0
+    private var preparedData: Data?
+    private var preparedSpeed = 0.0
+    private var packets: [[CGEvent]] = []
     private var offsets: [Double] = []
     private var loopDuration = 0.0
     private var index = 0, loop = 0, loops = 1
@@ -80,7 +83,7 @@ final class ClassicEngine {
         let key = UInt16(clamping: event.getIntegerValueField(.keyboardEventKeycode))
         if type == .keyDown || type == .keyUp {
             if [recordKey, playKey, stopKey].contains(key) {
-                if type == .keyDown && event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { control?(key == recordKey ? 0 : key == playKey ? 1 : 2) }
+                if type == .keyDown && event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { let command = key == recordKey ? 0 : key == playKey ? 1 : 2; DispatchQueue.main.async { [weak self] in self?.control?(command) } }
                 return true
             }
         }
@@ -118,27 +121,37 @@ final class ClassicEngine {
         let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM-dd HH-mm-ss"
         recording = MacroDocument(name: "Macro " + formatter.string(from: Date())); recordStart = ProcessInfo.processInfo.systemUptime; lastRecord = 0; lastMove = 0; setState("Recording")
     }
-    func play(_ document: MacroDocument, speed: Double, loops: Int, continuous: Bool) throws {
+    func play(_ document: MacroDocument, speed: Double, loops: Int, continuous: Bool, synchronizedStart: Double? = nil) throws {
         guard !busy else { return }; try enableMonitor(); try document.validate()
         guard !document.actions.isEmpty, speed.isFinite, (0.01...1000).contains(speed), (1...1_000_000).contains(loops) else { throw MacroError.message("Choose a nonempty macro, speed 0.01–1000x and loops 1–1,000,000.") }
         guard !document.actions.contains(where: { ["keyDown", "keyUp"].contains($0.type) && [recordKey, playKey, stopKey].contains($0.key) }) else { throw MacroError.message("This macro contains a control hotkey. Change the recording/playback hotkeys first.") }
         guard CGEventSource.flagsState(.combinedSessionState).intersection([.maskShift, .maskControl, .maskAlternate, .maskCommand]).isEmpty else { throw MacroError.message("Release modifier keys before playback.") }
+        if preparedData != (try document.data()) || preparedSpeed != speed { try prepare(document, speed: speed) }
         macro = document; self.speed = speed; self.loops = loops; self.continuous = continuous; index = 0; loop = 0
-        var original = 0.0
-        offsets = document.actions.map { action in
-            original += action.delay
-            return original / speed
-        }
-        loopDuration = original / speed
-        started = ProcessInfo.processInfo.systemUptime; due = offsets[0]; setState("Playing")
+        started = synchronizedStart ?? ProcessInfo.processInfo.systemUptime; due = offsets[0]; setState("Playing")
         timer = Timer(timeInterval: 0.005, repeats: true) { [weak self] _ in self?.tick() }; RunLoop.main.add(timer!, forMode: .common)
+    }
+    func prepare(_ document: MacroDocument, speed: Double) throws {
+        guard !busy else { throw MacroError.message("Stop the current task first.") }
+        try document.validate()
+        guard !document.actions.isEmpty, speed.isFinite, (0.01...1000).contains(speed) else { throw MacroError.message("Choose a nonempty recording and valid speed.") }
+        guard !document.actions.contains(where: { ["keyDown", "keyUp"].contains($0.type) && [recordKey, playKey, stopKey].contains($0.key) }) else { throw MacroError.message("The recording contains a playback control key.") }
+        var original = 0.0
+        let nextOffsets = document.actions.map { original += $0.delay; return original / speed }
+        held.removeAll(); defer { held.removeAll() }
+        var nextPackets: [[CGEvent]] = []
+        for action in document.actions { nextPackets.append(try events(action)); track(action) }
+        offsets = nextOffsets; loopDuration = original / speed; packets = nextPackets
+        preparedData = try document.data(); preparedSpeed = speed
     }
     private func tick() {
         guard state == "Playing" else { return }
         do {
             var burst = 0
             while ProcessInfo.processInfo.systemUptime - started >= due && burst < 64 {
-                let a = macro.actions[index]; try send(a); track(a); index += 1; burst += 1
+                let a = macro.actions[index]
+                if ProcessInfo.processInfo.systemUptime - started - due > 0.5 { throw MacroError.message("Playback stopped because it fell too far behind the original timeline. Close busy applications and try again.") }
+                for event in packets[index] { event.post(tap: .cghidEventTap) }; track(a); index += 1; burst += 1
                 if index == macro.actions.count {
                     release(clear: true); loop += 1
                     if !continuous && loop >= loops { stop(); return }; index = 0
@@ -177,8 +190,10 @@ final class ClassicEngine {
     }
     private func up(_ a: MacroAction) -> MacroAction { var result = a; result.type = a.type == "mouseDown" ? "mouseUp" : a.type == "flags" ? "flags" : "keyUp"; result.down = false; result.flags = 0; result.delay = 0; return result }
     private func release(clear: Bool) { for a in held.values { try? send(up(a), release: true) }; if clear { held.removeAll() } }
-    private func send(_ a: MacroAction, release: Bool = false) throws {
-        if a.type == "delay" { return }
+    private func send(_ a: MacroAction, release: Bool = false) throws { for event in try events(a, release: release) { event.post(tap: .cghidEventTap) } }
+    private func events(_ a: MacroAction, release: Bool = false) throws -> [CGEvent] {
+        if a.type == "delay" { return [] }
+        var result: [CGEvent] = []
         var event: CGEvent?
         if a.type.hasPrefix("key") || a.type == "flags" {
             event = CGEvent(keyboardEventSource: nil, virtualKey: a.key, keyDown: a.type == "keyDown" || (a.type == "flags" && a.down))
@@ -188,7 +203,7 @@ final class ClassicEngine {
             let onScreen = NSScreen.screens.contains { screen in guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return false }; return CGDisplayBounds(CGDirectDisplayID(number.uint32Value)).contains(point) }
             guard onScreen || release else { throw MacroError.message("A macro position is outside the current display layout.") }
             if a.type == "scroll" {
-                let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left); move?.setIntegerValueField(.eventSourceUserData, value: marker); move?.post(tap: .cghidEventTap)
+                let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left); move?.setIntegerValueField(.eventSourceUserData, value: marker); if let move { result.append(move) }
                 event = CGEvent(scrollWheelEvent2Source: nil, units: a.pixelScroll ? .pixel : .line, wheelCount: 2, wheel1: a.delta, wheel2: a.deltaX, wheel3: 0)
             } else {
                 let button = CGMouseButton(rawValue: a.button) ?? .left
@@ -202,7 +217,7 @@ final class ClassicEngine {
         }
         guard let event else { throw MacroError.message("macOS could not create a playback event.") }
         if a.type == "mouseDown" || a.type == "mouseUp" { event.setIntegerValueField(.mouseEventClickState, value: a.clickCount ?? 1) }
-        event.flags = CGEventFlags(rawValue: a.flags); event.setIntegerValueField(.eventSourceUserData, value: marker); event.post(tap: .cghidEventTap)
+        event.flags = CGEventFlags(rawValue: a.flags); event.setIntegerValueField(.eventSourceUserData, value: marker); result.append(event); return result
     }
     func shutdown() { stop(); if let source = tapSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }; if let tap { CFMachPortInvalidate(tap) }; tap = nil; tapSource = nil }
 }

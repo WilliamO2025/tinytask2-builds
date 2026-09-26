@@ -18,6 +18,8 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var macro: MacroDocument?
     var wasRecording = false
     var permissionsPending = false
+    var captureTimer: Timer?
+    var sessions: MacSessionWindow?
     let defaults = UserDefaults.standard
     var library: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("TinyTask2/Macros", isDirectory: true) }
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -31,7 +33,7 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let title = NSTextField(labelWithString: "TinyTask 2.0"); title.font = .systemFont(ofSize: 27, weight: .semibold)
         mode.addItems(withTitles: ["Classic", "Advanced"]); mode.target = self; mode.action = #selector(modeChanged)
         preferencesButton = button("Preferences", #selector(preferences))
-        stack.addArrangedSubview(row([title, mode, preferencesButton]))
+        stack.addArrangedSubview(row([title, mode, preferencesButton, button("Sessions", #selector(showSessions))]))
         openButton = button("Open", #selector(open)); saveButton = button("Save", #selector(save)); recordButton = button("● Record", #selector(record)); playButton = button("▶ Play", #selector(playPause)); pauseButton = button("Pause", #selector(pause)); let stopButton = button("■ Stop", #selector(stop))
         for control in [openButton!, saveButton!, recordButton!, playButton!, pauseButton!, stopButton] { control.widthAnchor.constraint(equalToConstant: 94).isActive = true }
         stack.addArrangedSubview(row([openButton, saveButton, recordButton, playButton, pauseButton, stopButton]))
@@ -83,7 +85,10 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(withTitle: "Record / finish", action: #selector(record), keyEquivalent: "").target = self; menu.addItem(withTitle: "Play / pause", action: #selector(playPause), keyEquivalent: "").target = self; menu.addItem(withTitle: "Stop", action: #selector(stop), keyEquivalent: "").target = self; menu.addItem(.separator()); menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"); statusItem.menu = menu
     }
     func update() {
-        if wasRecording && engine.state != "Recording" {
+        let finished = wasRecording && engine.state != "Recording"
+        wasRecording = engine.state == "Recording"
+        let empty = finished && !engine.recording.actions.contains { $0.type != "delay" }
+        if finished && !empty {
             macro = engine.recording; name.stringValue = engine.recording.name; detail.stringValue = "\(engine.recording.actions.count) actions"
             do {
                 try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true)
@@ -91,7 +96,13 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 try data.write(to: library.deletingLastPathComponent().appendingPathComponent("last-recording.json"), options: .atomic)
             } catch { DispatchQueue.main.async { [weak self] in self?.status.stringValue = "Recording kept in memory; auto-save failed: " + error.localizedDescription } }
         }
-        wasRecording = engine.state == "Recording"; status.stringValue = engine.state
+        status.stringValue = empty ? "No input captured. Record actions in another app, then press F8 to finish. Previous macro kept." : engine.state
+        captureTimer?.invalidate(); captureTimer = nil
+        if wasRecording { captureTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            guard let self else { return }; let a = self.engine.recording.actions
+            self.status.stringValue = "Recording: \(a.filter { $0.type == "move" }.count) moves, \(a.filter { $0.type == "mouseDown" }.count) clicks, \(a.filter { $0.type == "keyDown" }.count) keys. F8 finishes."
+        } }
+        sessions?.engineChanged()
         recordButton.title = wasRecording ? "Finish" : "● Record"; recordButton.isEnabled = mode.indexOfSelectedItem == 0 && ["Ready", "Recording"].contains(engine.state)
         playButton.isEnabled = mode.indexOfSelectedItem == 0 && ["Ready", "Paused"].contains(engine.state)
         pauseButton.title = engine.state == "Paused" ? "Resume" : "Pause"; pauseButton.isEnabled = ["Playing", "Paused"].contains(engine.state)
@@ -106,12 +117,14 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func playPause() {
         if ["Playing", "Paused"].contains(engine.state) { engine.pauseResume(); return }
         guard let macro, !macro.actions.isEmpty else { status.stringValue = "No recording available. Record or open a macro first."; return }
+        guard macro.actions.contains(where: { $0.type != "delay" }) else { status.stringValue = "This recording contains only waiting time. Record actions in another application, then press F8 to finish."; return }
         guard mode.indexOfSelectedItem == 0 else { status.stringValue = "Switch to Classic to play."; return }
         guard prepareInput() else { return }
         do { guard let rate = Double(speed.stringValue), let count = Int(loops.stringValue) else { throw MacroError.message("Enter a numeric speed and whole-number loop count.") }; saveSettings(); try engine.play(macro, speed: rate, loops: count, continuous: continuous.state == .on) } catch { status.stringValue = error.localizedDescription }
     }
     @objc func pause() { engine.pauseResume() }
-    @objc func stop() { engine.stop() }
+    @objc func stop() { sessions?.unready(); engine.stop() }
+    @objc func showSessions() { if sessions == nil { sessions = MacSessionWindow(app: self) }; sessions?.showWindow(nil) }
     @objc func modeChanged() { advanced.isHidden = mode.indexOfSelectedItem == 0; window.setContentSize(NSSize(width: 720, height: advanced.isHidden ? 365 : 465)); update() }
     @objc func show() { window.deminiaturize(nil); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
     @objc func open() {
@@ -184,7 +197,7 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applyAppearance() { NSApp.appearance = defaults.integer(forKey: "theme") == 1 ? NSAppearance(named: .aqua) : defaults.integer(forKey: "theme") == 2 ? NSAppearance(named: .darkAqua) : nil }
     func saveSettings() { defaults.set(speed.stringValue, forKey: "speed"); defaults.set(loops.stringValue, forKey: "loops"); defaults.set(continuous.state == .on, forKey: "continuous") }
     func windowShouldClose(_ sender: NSWindow) -> Bool { NSApp.terminate(nil); return false }
-    func applicationWillTerminate(_ notification: Notification) { saveSettings(); engine.shutdown(); if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) } }
+    func applicationWillTerminate(_ notification: Notification) { saveSettings(); sessions?.disconnect(); captureTimer?.invalidate(); engine.shutdown(); if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) } }
 }
 
 @main struct TinyTaskMain {
