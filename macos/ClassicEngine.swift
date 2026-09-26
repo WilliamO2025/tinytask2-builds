@@ -124,6 +124,7 @@ final class ClassicEngine {
         recording = MacroDocument(name: "Macro " + formatter.string(from: Date())); recordStart = ProcessInfo.processInfo.systemUptime; lastRecord = 0; lastMove = 0; setState("Recording")
     }
     func play(_ document: MacroDocument, speed: Double, loops: Int, continuous: Bool, synchronizedStart: Double? = nil) throws {
+        guard synchronizedStart?.isFinite ?? true else { throw MacroError.message("Invalid synchronized start time.") }
         guard !busy else { return }; try enableMonitor(); try document.validate()
         guard !document.actions.isEmpty, speed.isFinite, (0.01...1000).contains(speed), (1...1_000_000).contains(loops) else { throw MacroError.message("Choose a nonempty macro, speed 0.01–1000x and loops 1–1,000,000.") }
         guard !document.actions.contains(where: { ["keyDown", "keyUp"].contains($0.type) && [recordKey, playKey, stopKey].contains($0.key) }) else { throw MacroError.message("This macro contains a control hotkey. Change the recording/playback hotkeys first.") }

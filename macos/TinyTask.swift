@@ -62,7 +62,9 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             macro = nil; update(); playButton.performClick(nil)
             guard playButton.isEnabled && status.stringValue == "No recording available. Record or open a macro first." else { exit(1) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                guard let view = self.window.contentView?.superview, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(1) }
+                if CommandLine.arguments.contains("--session-window") { self.showSessions() }
+                let snapshotWindow = CommandLine.arguments.contains("--session-window") ? self.sessions!.window! : self.window
+                guard let view = snapshotWindow.contentView?.superview, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(1) }
                 view.effectiveAppearance.performAsCurrentDrawingAppearance {
                     view.layoutSubtreeIfNeeded(); view.displayIfNeeded(); view.cacheDisplay(in: view.bounds, to: bitmap)
                 }
@@ -205,6 +207,10 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if CommandLine.arguments.contains("--self-test") {
             do {
                 let original = MacroDocument(name: "Round trip", actions: [MacroAction(type: "mouseDown", delay: 0.25, x: 123, y: 456), MacroAction(type: "keyUp", key: 0)])
+                try ClassicEngine().prepare(original, speed: 1)
+                var invalidStartRejected = false
+                do { try ClassicEngine().play(original, speed: 1, loops: 1, continuous: false, synchronizedStart: .infinity) } catch { invalidStartRejected = error.localizedDescription == "Invalid synchronized start time." }
+                guard invalidStartRejected else { throw MacroError.message("Non-finite start time accepted") }
                 let decoded = try MacroDocument.load(original.data()); guard decoded.actions.count == 2 && decoded.actions[0].delay == 0.25 else { throw MacroError.message("Round-trip failed") }
                 let resume = ClassicEngine.resumeOrder([MacroAction(type: "keyDown", key: 0), MacroAction(type: "flags", key: 56, down: true)])
                 guard resume.first?.key == 56 else { throw MacroError.message("Modifier resume order failed") }
