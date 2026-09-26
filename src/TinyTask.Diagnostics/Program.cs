@@ -46,6 +46,7 @@ internal static class Program
             try {return SelfTest.Run(args.Length>1?args[1]:Path.Combine(AppContext.BaseDirectory,"self-test.json")).GetAwaiter().GetResult();}
             catch(Exception e) {File.WriteAllText(args.Length>1?args[1]:"self-test.json",JsonSerializer.Serialize(new {failure=e.ToString()}));return 1;}
         }
+        if(args.FirstOrDefault()=="--long-recording-test" && args.Length==2)return LongRecordingTests.Run(args[1]);
         var app=new Application {ShutdownMode=ShutdownMode.OnMainWindowClose};
         if(args.FirstOrDefault()=="--classic-test")
         {

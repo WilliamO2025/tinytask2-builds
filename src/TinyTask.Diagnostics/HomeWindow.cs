@@ -74,7 +74,7 @@ internal sealed class HomeWindow : Window
         Get<Button>("Record").Click+=(_,_)=>ToggleRecord();Get<Button>("Play").Click+=(_,_)=>PlayMacro();Get<Button>("Pause").Click+=(_,_)=>PauseMacro();
         Get<Button>("Stop").Click+=(_,_)=>StopAll();
         engine.Disarmed+=()=>{if(sessionWindow!=null)_=sessionWindow.SetNotReady();};
-        captureTimer.Tick+=(_,_)=>Status($"Recording: {engine.Recording.Actions.Count(a=>a.Type=="move")} moves, {engine.Recording.Actions.Count(a=>a.Type=="mouseDown")} clicks, {engine.Recording.Actions.Count(a=>a.Type=="keyDown")} keys. Use another app; F8 finishes.");
+        captureTimer.Tick+=(_,_)=>Status($"Recording: {engine.CapturedMoves} moves, {engine.CapturedClicks} clicks, {engine.CapturedKeys} keys. Use another app; F8 finishes.");
         engine.Changed+=EngineChanged;engine.Failed+=message=>Dispatcher.BeginInvoke(()=>Status(message));
         engine.IsControlKey=key=>key==121||Bindings.Any(b=>b.Matches(key,Shortcut.CurrentModifiers()));
         engine.IsStopKey=key=>new Shortcut(prefs.StopKey,prefs.StopModifiers).Matches(key,Shortcut.CurrentModifiers());
@@ -96,7 +96,7 @@ internal sealed class HomeWindow : Window
         IsVisibleChanged+=(_,_)=>UpdateTimer();
         focusTimer.Tick+=(_,_)=>UpdateDetails();
         SourceInitialized+=(_,_)=>{hwnd=new WindowInteropHelper(this).Handle;source=HwndSource.FromHwnd(hwnd);source.AddHook(WndProc);RegisterControls();UiTheme.Caption(this,prefs.Dark);};
-        Loaded+=(_,_)=>{string recovery=Path.Combine(MainWindow.DataDirectory,"last-recording.json");if(File.Exists(recovery))try{LoadDocument(File.ReadAllText(recovery),"Last recording");}catch(Exception e){Status("Recovery could not open: "+e.Message);}};
+        Loaded+=(_,_)=>{string recovery=Path.Combine(MainWindow.DataDirectory,"last-recording.json");if(File.Exists(Path.ChangeExtension(recovery,"ttmacro")))recovery=Path.ChangeExtension(recovery,"ttmacro");if(File.Exists(recovery))try{LoadDocument(MacroFiles.Read(recovery),"Last recording");}catch(Exception e){Status("Recovery could not open: "+e.Message);}};
         Closing+=(_,_)=>StopAll();
         Closed+=(_,_)=>{focusTimer.Stop();captureTimer.Stop();engine.Dispose();diagnostics?.Close();SavePreferences();UnregisterControls();source?.RemoveHook(WndProc);tray.Dispose();};
     }
@@ -157,7 +157,7 @@ internal sealed class HomeWindow : Window
         if(finished&&!empty)
         {
             string json=new PlaybackSettings(prefs.Speed,prefs.Loops,prefs.Continuous).Write(JsonSerializer.Serialize(engine.Recording,MacroDocument.Json));LoadDocument(json,engine.Recording.Name);
-            try{Directory.CreateDirectory(LibraryDirectory);SaveCopy(Path.Combine(MainWindow.DataDirectory,"last-recording.json"));SaveCopy(Path.Combine(LibraryDirectory,engine.Recording.Name+"-"+DateTime.Now.ToString("fff")+".json"));}catch(Exception e){Dispatcher.BeginInvoke(()=>Status("Recording kept in memory; auto-save failed: "+e.Message));}
+            try{Directory.CreateDirectory(LibraryDirectory);SaveCopy(Path.Combine(MainWindow.DataDirectory,"last-recording.ttmacro"));SaveCopy(Path.Combine(LibraryDirectory,engine.Recording.Name+"-"+DateTime.Now.ToString("fff")+".ttmacro"));}catch(Exception e){Dispatcher.BeginInvoke(()=>Status("Recording kept in memory; auto-save failed: "+e.Message));}
         }
         if(wasRecording)captureTimer.Start();else captureTimer.Stop();
         Status(empty?"No input captured. Click Record, use another application, then press F8 to finish. Your previous macro was kept.":engine.State);Get<Button>("Record").Content=wasRecording?"Finish":"●  Record";
@@ -217,16 +217,14 @@ internal sealed class HomeWindow : Window
     }
     private void OpenMacro()
     {
-        Directory.CreateDirectory(LibraryDirectory);var dialog=new Microsoft.Win32.OpenFileDialog{Filter="Macro JSON (*.json)|*.json",InitialDirectory=LibraryDirectory};if(dialog.ShowDialog(this)!=true)return;
+        Directory.CreateDirectory(LibraryDirectory);var dialog=new Microsoft.Win32.OpenFileDialog{Filter="TinyTask compressed macro (*.ttmacro)|*.ttmacro|Macro JSON (*.json)|*.json",InitialDirectory=LibraryDirectory};if(dialog.ShowDialog(this)!=true)return;
         try
         {
-            if(new FileInfo(dialog.FileName).Length>MacroDocument.MaxFileBytes)throw new InvalidDataException("Macro files must be smaller than 64 MB.");
-            LoadDocument(File.ReadAllText(dialog.FileName),Path.GetFileNameWithoutExtension(dialog.FileName));
+            LoadDocument(MacroFiles.Read(dialog.FileName),Path.GetFileNameWithoutExtension(dialog.FileName));
         }catch(Exception e){UiTheme.Message(this,e.Message,"Could not open macro");}
     }
     internal void LoadDocument(string json,string name)
     {
-        if(System.Text.Encoding.UTF8.GetByteCount(json)>MacroDocument.MaxFileBytes)throw new InvalidDataException("Macro files must be smaller than 64 MB.");
         using var parsed=JsonDocument.Parse(json);
         if(parsed.RootElement.ValueKind!=JsonValueKind.Object || !parsed.RootElement.TryGetProperty("actions",out var actions) || actions.ValueKind!=JsonValueKind.Array)throw new InvalidDataException("This file needs an actions list.");
         var profile=PlaybackSettings.Read(json);
@@ -236,15 +234,12 @@ internal sealed class HomeWindow : Window
     internal void SaveCopy(string path)
     {
         if(macroJson==null)throw new InvalidOperationException("Open a macro first.");
-        if(System.Text.Encoding.UTF8.GetByteCount(macroJson)>MacroDocument.MaxFileBytes)throw new InvalidDataException("Macro files must be smaller than 64 MB.");
-        string temporary=path+"."+Guid.NewGuid().ToString("N")+".tmp";
-        try {File.WriteAllText(temporary,macroJson);File.Move(temporary,path,true);}
-        finally {if(File.Exists(temporary))File.Delete(temporary);}
+        MacroFiles.Write(path,macroJson);
     }
     private void SaveMacro()
     {
         if(macroJson==null)return;
-        Directory.CreateDirectory(LibraryDirectory);var dialog=new Microsoft.Win32.SaveFileDialog{Filter="Macro JSON (*.json)|*.json",InitialDirectory=LibraryDirectory,FileName=Get<TextBlock>("MacroName").Text+".json"};if(dialog.ShowDialog(this)!=true)return;
+        Directory.CreateDirectory(LibraryDirectory);var dialog=new Microsoft.Win32.SaveFileDialog{Filter="TinyTask compressed macro (*.ttmacro)|*.ttmacro|Macro JSON (*.json)|*.json",InitialDirectory=LibraryDirectory,FileName=Get<TextBlock>("MacroName").Text+".ttmacro",DefaultExt=".ttmacro"};if(dialog.ShowDialog(this)!=true)return;
         try {macroJson=CurrentPlaybackSettings().Write(macroJson,Path.GetFileNameWithoutExtension(dialog.FileName));SaveCopy(dialog.FileName);Get<TextBlock>("MacroName").Text=Path.GetFileNameWithoutExtension(dialog.FileName);Status("Ready");}catch(Exception e){UiTheme.Message(this,e.Message,"Could not save macro");}
     }
     private void Settings()=>CreateSettingsWindow().ShowDialog();

@@ -64,7 +64,7 @@ internal static class ClassicTests
             engine.Prepare(hold,1,true);Check("Preparation arms emergency stop without pressing keys",engine.Armed&&(Native.GetAsyncKeyState(0xA0)&0x8000)==0);
             await Task.Run(()=>{ClassicEngine.Send(new(){Type="keyDown",Key=121,Scan=0x44});ClassicEngine.Send(new(){Type="keyUp",Key=121,Scan=0x44});});await Task.Delay(50);
             Check("F10 cancels an armed task and notifies session readiness",!engine.Armed&&disarmed==1);
-            var editable=new MacroDocument{Actions=new(){new(){Type="delay",Delay=0.01}}};engine.Prepare(editable,1);editable.Actions[0].Delay=0.08;var editedClock=Stopwatch.StartNew();await engine.Play(editable,1,1,false);
+            var editable=new MacroDocument{Actions=new(){new(){Type="delay",Delay=0.01}}};engine.Prepare(editable,1);editable.Actions[0]=editable.Actions[0] with{Delay=0.08};var editedClock=Stopwatch.StartNew();await engine.Play(editable,1,1,false);
             Check("Edited macro invalidates prepared native timeline",editedClock.Elapsed.TotalSeconds>=0.075);
             var lateness=new MacroDocument{Actions=new(){new(){Type="delay",Delay=0.05}}};
             playing=engine.Play(lateness,1,1,false);Thread.Sleep(650);bool lateStopped=false;try{await playing;}catch(InvalidOperationException){lateStopped=true;}

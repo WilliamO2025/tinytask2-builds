@@ -13,7 +13,7 @@ namespace TinyTask;
 internal sealed record MacroAction
 {
     public string Type {get;init;}="delay";
-    public double Delay {get;set;}
+    public double Delay {get;init;}
     public int X {get;init;}
     public int Y {get;init;}
     public string Button {get;init;}="left";
@@ -26,7 +26,6 @@ internal sealed record MacroAction
 }
 internal sealed class MacroDocument
 {
-    internal const int MaxFileBytes=64*1024*1024;
     public int Version {get;set;}=1;
     public string Platform {get;set;}="windows";
     public string Name {get;set;}="Untitled macro";
@@ -42,14 +41,14 @@ internal sealed class MacroDocument
     internal void Validate()
     {
         if(Version!=1 || Platform!="windows")throw new ArgumentException("This macro needs its original platform. Windows Classic supports version 1 Windows macros.");
-        if(Actions==null || Actions.Count>100000)throw new ArgumentException("Macro is too large (maximum 100,000 actions).");
+        if(Actions==null)throw new ArgumentException("Macro actions are missing.");
         if(Coordinates is not ("screen" or "client"))throw new ArgumentException("Unknown coordinate format.");
         foreach(var a in Actions)
         {
             if(a==null || !double.IsFinite(a.Delay) || a.Delay<0 || a.Delay>86400)throw new ArgumentException("Invalid action delay.");
             if(a.Text?.Length>16)throw new ArgumentException("A recorded text event is too long.");
-            if(!new[]{"move","mouseDown","mouseUp","scroll","keyDown","keyUp","delay"}.Contains(a.Type))throw new ArgumentException("Unsupported action: "+a.Type);
-            if(a.Type.StartsWith("mouse") && !new[]{"left","right","middle","x1","x2"}.Contains(a.Button))throw new ArgumentException("Unknown mouse button.");
+            if(a.Type is not ("move" or "mouseDown" or "mouseUp" or "scroll" or "keyDown" or "keyUp" or "delay"))throw new ArgumentException("Unsupported action: "+a.Type);
+            if(a.Type.StartsWith("mouse") && a.Button is not ("left" or "right" or "middle" or "x1" or "x2"))throw new ArgumentException("Unknown mouse button.");
             if(a.Type.StartsWith("key") && (a.Key<1 || a.Key>254 || a.Scan<0 || a.Scan>255))throw new ArgumentException("Invalid key code.");
             if(a.Type=="scroll" && (a.Delta < -32768 || a.Delta>32767))throw new ArgumentException("Invalid scroll amount.");
         }
@@ -85,6 +84,10 @@ internal sealed class ClassicEngine : IDisposable
     private Input[][]? preparedInputs;
     private PlaybackTimeline? preparedTimeline;
     internal bool Armed {get;private set;}
+    internal int PreparedPacketCapacity=>preparedInputs?.Length??0;
+    internal long CapturedMoves {get;private set;}
+    internal long CapturedClicks {get;private set;}
+    internal long CapturedKeys {get;private set;}
     internal void Prepare(MacroDocument macro,double speed,bool arm=false)
     {
         if(IsBusy)throw new InvalidOperationException("Stop playback before preparing another task.");
@@ -92,9 +95,10 @@ internal sealed class ClassicEngine : IDisposable
         if(macro.Coordinates!="screen")throw new ArgumentException("Session playback currently supports Classic screen recordings.");
         if(macro.Actions.Count==0)throw new ArgumentException("Record or open a macro first.");
         if(ContainsControlSequence?.Invoke(macro.Actions)??macro.Actions.Any(a=>a.Type.StartsWith("key")&&IsControlKey(a.Key)))throw new ArgumentException("This macro contains a playback control shortcut.");
-        var actions=macro.Actions.Select(a=>a with{}).ToArray();
+        var actions=macro.Actions.ToArray();
         var timeline=new PlaybackTimeline(actions.Select(a=>a.Delay).ToArray(),speed);
-        var inputs=actions.Select(a=>PrepareInput(a,true)).ToArray();
+        foreach(var action in actions)if(action.Type is "move" or "mouseDown" or "mouseUp" or "scroll")ValidatePosition(action);
+        var inputs=actions.Take(512).Select(a=>PrepareInput(a,true)).ToArray();
         preparedSource=macro;preparedSpeed=speed;preparedDisplay=DisplayMetrics();preparedActions=actions;preparedTimeline=timeline;preparedInputs=inputs;
         if(arm&&keyboardHook==0){keyboardHook=SetWindowsHookEx(13,keyboardCallback,GetModuleHandle(null),0);if(keyboardHook==0)throw new Win32Exception(Marshal.GetLastWin32Error(),"Emergency stop could not be armed.");}
         Armed=arm;
@@ -112,6 +116,7 @@ internal sealed class ClassicEngine : IDisposable
         ObjectDisposedException.ThrowIf(disposed,this);
         if(IsBusy)throw new InvalidOperationException("Stop the current task first.");
         target?.Validate();recordingTarget=target;
+        CapturedMoves=CapturedClicks=CapturedKeys=0;
         Recording=new(){Name="Macro "+DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss"),Coordinates=target==null?"screen":"client",TargetProcess=target?.Process};lastRecord=0;
         mouseHook=SetWindowsHookEx(14,mouseCallback,GetModuleHandle(null),0);
         keyboardHook=SetWindowsHookEx(13,keyboardCallback,GetModuleHandle(null),0);
@@ -122,8 +127,8 @@ internal sealed class ClassicEngine : IDisposable
     private void Append(MacroAction action)
     {
         double now=recordClock.Elapsed.TotalSeconds;
-        if(Recording.Actions.Count>=99700){System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(()=>{Stop();Failed?.Invoke("Recording stopped at the action limit. Save this macro before continuing.");});return;}
-        action.Delay=Math.Max(0,now-lastRecord);lastRecord=now;Recording.Actions.Add(action);
+        action=action with{Delay=Math.Max(0,now-lastRecord)};lastRecord=now;Recording.Actions.Add(action);
+        if(action.Type=="move")CapturedMoves++;else if(action.Type=="mouseDown")CapturedClicks++;else if(action.Type=="keyDown")CapturedKeys++;
     }
     private nint MouseHook(int code,nint message,nint data)
     {
@@ -203,6 +208,7 @@ internal sealed class ClassicEngine : IDisposable
             Armed=false;SetState("Playing");
             for(long loop=0;continuous || loop<loops;loop++)
             {
+                if(prepared!=null)ResetPackets(actions,prepared);
                 int burst=0;
                 for(int index=0;index<actions.Length;index++)
                 {
@@ -216,8 +222,9 @@ internal sealed class ClassicEngine : IDisposable
                     if(LastLatenessMilliseconds>MaximumLatenessSeconds*1000)throw new InvalidOperationException("Playback stopped because input fell too far behind its original timeline. No overdue backlog was replayed.");
                     // Track down events before injection so partial SendInput failure still releases them.
                     if(action.Type is "keyDown" or "mouseDown")Track(action);
-                    if(prepared!=null)InjectPrepared(prepared[index]);else Dispatch(action);
+                    if(prepared!=null)InjectPrepared(prepared[index%prepared.Length]);else Dispatch(action);
                     Track(action);
+                    if(prepared!=null)RefillPacket(actions,prepared,index);
                     // Yield even for zero-delay/100x macros so Stop and hotkeys stay responsive.
                     if(++burst%64==0)await Task.Delay(1,cancel.Token);
                 }
@@ -227,6 +234,23 @@ internal sealed class ClassicEngine : IDisposable
         }
         catch(OperationCanceledException) when(cancel.IsCancellationRequested){}
         finally {Microsoft.Win32.SystemEvents.DisplaySettingsChanged-=displayChanged;playClock.Stop();playback=null;ReleaseHeld(true);windowPlayback=null;Unhook();SetState("Ready");}
+    }
+    private static void ResetPackets(MacroAction[] actions,Input[][] packets)
+    {for(int i=0;i<packets.Length;i++)packets[i]=PrepareInput(actions[i],true);}
+    private static void RefillPacket(MacroAction[] actions,Input[][] packets,int index)
+    {if(index+packets.Length<actions.Length)packets[index%packets.Length]=PrepareInput(actions[index+packets.Length],true);}
+    internal void VerifyPreparedQueueForTest()
+    {
+        var actions=preparedActions!;var packets=preparedInputs!;
+        for(int replay=0;replay<2;replay++)
+        {
+            ResetPackets(actions,packets);
+            for(int i=0;i<actions.Length;i++)
+            {
+                if(!packets[i%packets.Length].SequenceEqual(PrepareInput(actions[i],true)))throw new InvalidOperationException("Prepared input queue changed action order.");
+                RefillPacket(actions,packets,i);
+            }
+        }
     }
     private static string HeldId(MacroAction a)=>a.Type.StartsWith("key")?"key:"+a.Key:"mouse:"+a.Button;
     private void Track(MacroAction a){if(a.Type is "keyDown" or "mouseDown")held[HeldId(a)]=a;else if(a.Type is "keyUp" or "mouseUp")held.Remove(HeldId(a));}
@@ -259,6 +283,11 @@ internal sealed class ClassicEngine : IDisposable
     public void Dispose(){if(disposed)return;disposed=true;Stop();Unhook();}
     private void Dispatch(MacroAction action,bool positionMouse=true){if(windowPlayback!=null)windowPlayback.Send(action,positionMouse);else Send(action,positionMouse);}
     internal static void Send(MacroAction a,bool positionMouse=true)=>InjectPrepared(PrepareInput(a,positionMouse));
+    private static void ValidatePosition(MacroAction a)
+    {
+        var (left,top,width,height)=DisplayMetrics();
+        if(a.X<left||a.Y<top||(long)a.X>=(long)left+width||(long)a.Y>=(long)top+height)throw new InvalidOperationException("A macro position is outside the current desktop. Restore the original display layout.");
+    }
     private static Input[] PrepareInput(MacroAction a,bool positionMouse)
     {
         var inputs=new List<Input>(2);

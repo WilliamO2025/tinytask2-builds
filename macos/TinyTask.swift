@@ -48,8 +48,9 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         advanced.addArrangedSubview(button("Open Input Lab diagnostics", #selector(diagnostics))); advanced.isHidden = true; stack.addArrangedSubview(advanced)
         stack.addArrangedSubview(status)
         makeMenus(); applyAppearance(); window.level = defaults.bool(forKey: "alwaysOnTop") ? .floating : .normal
-        let recovery = library.deletingLastPathComponent().appendingPathComponent("last-recording.json")
-        if let data = try? Data(contentsOf: recovery), let saved = try? MacroDocument.load(data) { macro = saved; name.stringValue = saved.name; detail.stringValue = "\(saved.actions.count) actions" }
+        let compressedRecovery = library.deletingLastPathComponent().appendingPathComponent("last-recording.ttmacro")
+        let recovery = FileManager.default.fileExists(atPath: compressedRecovery.path) ? compressedRecovery : library.deletingLastPathComponent().appendingPathComponent("last-recording.json")
+        if let data = try? MacroFiles.read(recovery), let saved = try? MacroDocument.load(data) { macro = saved; name.stringValue = saved.name; detail.stringValue = "\(saved.actions.count) actions" }
         update(); window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         if !CommandLine.arguments.contains("--ui-smoke") {
             if !refreshPermissions() && !defaults.bool(forKey: "permissionRequestShown") {
@@ -94,15 +95,15 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             macro = engine.recording; name.stringValue = engine.recording.name; detail.stringValue = "\(engine.recording.actions.count) actions"
             do {
                 try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true)
-                let data = try engine.recording.data(); try data.write(to: library.appendingPathComponent(engine.recording.name + "-" + String(UUID().uuidString.prefix(8)) + ".json"), options: .atomic)
-                try data.write(to: library.deletingLastPathComponent().appendingPathComponent("last-recording.json"), options: .atomic)
+                let data = try engine.recording.data(); try MacroFiles.write(data, to: library.appendingPathComponent(engine.recording.name + "-" + String(UUID().uuidString.prefix(8)) + ".ttmacro"))
+                try MacroFiles.write(data, to: library.deletingLastPathComponent().appendingPathComponent("last-recording.ttmacro"))
             } catch { DispatchQueue.main.async { [weak self] in self?.status.stringValue = "Recording kept in memory; auto-save failed: " + error.localizedDescription } }
         }
         status.stringValue = empty ? "No input captured. Record actions in another app, then press F8 to finish. Previous macro kept." : engine.state
         captureTimer?.invalidate(); captureTimer = nil
         if wasRecording { captureTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-            guard let self else { return }; let a = self.engine.recording.actions
-            self.status.stringValue = "Recording: \(a.filter { $0.type == "move" }.count) moves, \(a.filter { $0.type == "mouseDown" }.count) clicks, \(a.filter { $0.type == "keyDown" }.count) keys. F8 finishes."
+            guard let self else { return }
+            self.status.stringValue = "Recording: \(self.engine.capturedMoves) moves, \(self.engine.capturedClicks) clicks, \(self.engine.capturedKeys) keys. F8 finishes."
         } }
         sessions?.engineChanged()
         recordButton.title = wasRecording ? "Finish" : "● Record"; recordButton.isEnabled = mode.indexOfSelectedItem == 0 && ["Ready", "Recording"].contains(engine.state)
@@ -113,7 +114,7 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func record() {
         if engine.state == "Recording" { engine.stop(); return }
         guard mode.indexOfSelectedItem == 0 else { status.stringValue = "Switch to Classic to record."; return }
-        guard prepareInput() else { return }
+        guard prepareInput(playback: false) else { return }
         do { try engine.record() } catch { status.stringValue = error.localizedDescription }
     }
     @objc func playPause() {
@@ -130,50 +131,60 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func modeChanged() { advanced.isHidden = mode.indexOfSelectedItem == 0; window.setContentSize(NSSize(width: 720, height: advanced.isHidden ? 365 : 465)); update() }
     @objc func show() { window.deminiaturize(nil); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
     @objc func open() {
-        guard !engine.busy else { return }; let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]; panel.directoryURL = library; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        guard !engine.busy else { return }; let panel = NSOpenPanel(); panel.allowedContentTypes = [UTType(filenameExtension: "ttmacro") ?? .data, .json]; panel.directoryURL = library; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         panel.beginSheetModal(for: window) { [weak self] result in
             guard result == .OK, let url = panel.url, let self else { return }
-            do { let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0; guard size <= 64 * 1024 * 1024 else { throw MacroError.message("Macro file is too large.") }; let opened = try MacroDocument.load(Data(contentsOf: url)); self.macro = opened; self.name.stringValue = url.deletingPathExtension().lastPathComponent; self.detail.stringValue = "\(opened.actions.count) actions"; self.update() } catch { self.status.stringValue = error.localizedDescription }
+            do { let opened = try MacroDocument.load(MacroFiles.read(url)); self.macro = opened; self.name.stringValue = url.deletingPathExtension().lastPathComponent; self.detail.stringValue = "\(opened.actions.count) actions"; self.update() } catch { self.status.stringValue = error.localizedDescription }
         }
     }
     @objc func save() {
-        guard !engine.busy, var macro else { return }; let panel = NSSavePanel(); panel.allowedContentTypes = [.json]; panel.directoryURL = library; panel.nameFieldStringValue = name.stringValue + ".json"
+        guard !engine.busy, var macro else { return }; let panel = NSSavePanel(); panel.allowedContentTypes = [UTType(filenameExtension: "ttmacro") ?? .data, .json]; panel.directoryURL = library; panel.nameFieldStringValue = name.stringValue + ".ttmacro"; panel.allowsOtherFileTypes = true
         panel.beginSheetModal(for: window) { [weak self] result in
-            guard result == .OK, let url = panel.url else { return }; do { macro.name = url.deletingPathExtension().lastPathComponent; try macro.data().write(to: url, options: .atomic); self?.macro = macro; self?.name.stringValue = macro.name } catch { self?.status.stringValue = error.localizedDescription }
+            guard result == .OK, let url = panel.url else { return }; do { macro.name = url.deletingPathExtension().lastPathComponent; try MacroFiles.write(macro.data(), to: url); self?.macro = macro; self?.name.stringValue = macro.name } catch { self?.status.stringValue = error.localizedDescription }
         }
     }
     // Permission dialogs are asynchronous. Never start recording/playback as a
     // side effect of approval; the user explicitly clicks the action again.
-    var inputAccessGranted: Bool { AXIsProcessTrusted() && CGPreflightListenEventAccess() && CGPreflightPostEventAccess() }
-    func refreshPermissions() -> Bool {
-        guard inputAccessGranted else {
-            status.stringValue = "Permission needed. Click Record, Play, or Enable permissions to request access."
-            return false
-        }
+    // Recording needs the filtering tap; posting is required only for playback.
+    func refreshPermissions(playback: Bool = false) -> Bool {
+        guard !playback || CGPreflightPostEventAccess() else { return false }
         do {
             try engine.enableMonitor(); permissionsPending = false
             status.stringValue = "Permissions ready. Click Record or Play to begin."
             return true
         } catch { status.stringValue = error.localizedDescription; return false }
     }
-    func prepareInput() -> Bool {
-        if refreshPermissions() { return true }
-        permissions(); return false
+    func prepareInput(playback: Bool = true) -> Bool {
+        if refreshPermissions(playback: playback) { return true }
+        requestPermissions(playback: playback)
+        return false
     }
     func applicationDidBecomeActive(_ notification: Notification) {
         if permissionsPending && !engine.busy { _ = refreshPermissions() }
     }
-    @objc func permissions() {
+    @objc func permissions() { requestPermissions(playback: true) }
+    func requestPermissions(playback: Bool) {
         guard !engine.busy else { return }
         permissionsPending = true; defaults.set(true, forKey: "permissionRequestShown")
-        if !AXIsProcessTrusted() {
+        // Request only missing access. Never start input as a side effect of consent.
+        let accessibility = AXIsProcessTrusted(), monitoring = CGPreflightListenEventAccess()
+        if !accessibility {
             _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
+        } else if !monitoring {
+            _ = CGRequestListenEventAccess()
+        } else if playback && !CGPreflightPostEventAccess() {
+            _ = CGRequestPostEventAccess()
         }
-        if !CGPreflightListenEventAccess() { _ = CGRequestListenEventAccess() }
-        if !CGPreflightPostEventAccess() { _ = CGRequestPostEventAccess() }
-        if !refreshPermissions() && !inputAccessGranted {
-            status.stringValue = "Approve macOS's access requests. If macOS opens System Settings, enable TinyTask 2.0 there, then return. A restart may be required."
-        }
+        if refreshPermissions(playback: playback) { return }
+        status.stringValue = "Access is not ready. See the permission help for this copy of TinyTask."
+        let help = NSAlert(); help.messageText = "Allow this copy of TinyTask 2.0"
+        help.informativeText = "Running app: \(Bundle.main.bundleURL.path)\n\nAccessibility: \(AXIsProcessTrusted() ? "Allowed" : "Not available")\nInput Monitoring: \(CGPreflightListenEventAccess() ? "Allowed" : "Not available")\nPlayback access: \(CGPreflightPostEventAccess() ? "Allowed" : "Not available")\n\nMove the app to Applications before granting access. If the switches are already on, fully quit TinyTask, remove the old entry using the minus button in System Settings, then add this copy and reopen it. Ad-hoc signed updates may need approval again. macOS requires you to approve access; the app cannot grant itself permission."
+        help.addButton(withTitle: "Open System Settings"); help.addButton(withTitle: "Show This App"); help.addButton(withTitle: "Close")
+        let response = help.runModal()
+        if response == .alertFirstButtonReturn {
+            let pane = !AXIsProcessTrusted() || monitoring ? "Privacy_Accessibility" : "Privacy_ListenEvent"
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?" + pane) { NSWorkspace.shared.open(url) }
+        } else if response == .alertSecondButtonReturn { NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL]) }
     }
     @objc func preferences() {
         guard !engine.busy else { return }
@@ -208,6 +219,7 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             do {
                 let original = MacroDocument(name: "Round trip", actions: [MacroAction(type: "mouseDown", delay: 0.25, x: 123, y: 456), MacroAction(type: "keyUp", key: 0)])
                 try ClassicEngine.testPreciseRecording()
+                try ClassicEngine.testLongRecording()
                 try ClassicEngine().prepare(original, speed: 1)
                 var invalidStartRejected = false
                 do { try ClassicEngine().play(original, speed: 1, loops: 1, continuous: false, synchronizedStart: .infinity) } catch { invalidStartRejected = error.localizedDescription == "Invalid synchronized start time." }
