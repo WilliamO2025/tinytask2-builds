@@ -1,16 +1,18 @@
-﻿# TinyTask 2.0
+# TinyTask 2.0
 
 A compact Classic macro recorder for Windows and macOS, with a separate experimental Input Lab.
 
 ## Downloads
 
-[Download v0.2.0-rc3 from GitHub Releases](https://github.com/WilliamO2025/tinytask2-builds/releases/tag/v0.2.0-rc3).
+RC4 includes Windows playback improvements and an experimental session preview requiring a configured server. No public session server is provided. The macOS build includes Classic timing updates; Windows session features are not available on Mac.
 
-- [Windows installer](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc3/TinyTask2-Windows.Setup.exe)
-- [Windows portable app](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc3/TinyTask2-Windows.exe)
-- [TinyTask 2.0 for macOS](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc3/TinyTask2-macOS.zip)
-- [Windows Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc3/TinyTask2-Windows-InputLab.exe)
-- [macOS Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc3/TinyTask2-macOS-InputLab.zip)
+[Download v0.2.0-rc4 from GitHub Releases](https://github.com/WilliamO2025/tinytask2-builds/releases/tag/v0.2.0-rc4).
+
+- [Windows installer](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc4/TinyTask2-Windows.Setup.exe)
+- [Windows portable app](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc4/TinyTask2-Windows.exe)
+- [TinyTask 2.0 for macOS](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc4/TinyTask2-macOS.zip)
+- [Windows Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc4/TinyTask2-Windows-InputLab.exe)
+- [macOS Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc4/TinyTask2-macOS-InputLab.zip)
 
 Windows: run the installer for Start Menu and desktop shortcuts, or open the portable EXE. The runtime is included. Builds are unsigned and may trigger SmartScreen.
 
