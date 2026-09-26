@@ -47,7 +47,7 @@ final class ClassicEngine {
     private var tap: CFMachPort?
     private var tapSource: CFRunLoopSource?
     private var timer: Timer?
-    private var lastRecord = 0.0, recordStart = 0.0, lastMove = 0.0
+    private var lastRecord = 0.0, recordStart = 0.0
     private var started = 0.0, pausedAt = 0.0, due = 0.0
     private var preparedDisplays: [CGRect] = []
     private var displayLayout: [CGRect] { NSScreen.screens.compactMap { screen in (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber).map { CGDisplayBounds(CGDirectDisplayID($0.uint32Value)) } } }
@@ -93,7 +93,7 @@ final class ClassicEngine {
         let keyboard = type == .keyDown || type == .keyUp || type == .flagsChanged
         if keyboard && NSApp.isActive { return false }
         let p = event.location
-        if !keyboard {
+        if !keyboard && ![CGEventType.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged].contains(type) {
             let cocoa = NSPoint(x: p.x, y: (NSScreen.screens.first?.frame.maxY ?? 0) - p.y)
             if NSApp.windows.contains(where: { $0.isVisible && !$0.isMiniaturized && $0.frame.contains(cocoa) }) { return false }
         }
@@ -110,18 +110,16 @@ final class ClassicEngine {
             a.deltaX = Int32(clamping: event.getIntegerValueField(a.pixelScroll ? .scrollWheelEventPointDeltaAxis2 : .scrollWheelEventDeltaAxis2))
         default: break
         }
-        if !keyboard { a.button = UInt32(clamping: event.getIntegerValueField(.mouseEventButtonNumber)) }
+        if !keyboard && ![CGEventType.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged].contains(type) { a.button = UInt32(clamping: event.getIntegerValueField(.mouseEventButtonNumber)) }
         if a.type == "mouseDown" || a.type == "mouseUp" { a.clickCount = event.getIntegerValueField(.mouseEventClickState) }
         let now = ProcessInfo.processInfo.systemUptime - recordStart
-        if a.type == "move" && now - lastMove < 0.008 { return false }
-        if a.type == "move" { lastMove = now }
         if recording.actions.count >= 99_700 { stop(); failed?("Recording stopped at the action limit. Save it before continuing."); return false }
         a.delay = max(0, now - lastRecord); lastRecord = now; recording.actions.append(a); return false
     }
     func record() throws {
         guard !busy else { return }; try enableMonitor()
         let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM-dd HH-mm-ss"
-        recording = MacroDocument(name: "Macro " + formatter.string(from: Date())); recordStart = ProcessInfo.processInfo.systemUptime; lastRecord = 0; lastMove = 0; setState("Recording")
+        recording = MacroDocument(name: "Macro " + formatter.string(from: Date())); recordStart = ProcessInfo.processInfo.systemUptime; lastRecord = 0; setState("Recording")
     }
     func play(_ document: MacroDocument, speed: Double, loops: Int, continuous: Bool, synchronizedStart: Double? = nil) throws {
         guard synchronizedStart?.isFinite ?? true else { throw MacroError.message("Invalid synchronized start time.") }
@@ -230,6 +228,15 @@ final class ClassicEngine {
         guard let event else { throw MacroError.message("macOS could not create a playback event.") }
         if a.type == "mouseDown" || a.type == "mouseUp" { event.setIntegerValueField(.mouseEventClickState, value: a.clickCount ?? 1) }
         event.flags = CGEventFlags(rawValue: a.flags); event.setIntegerValueField(.eventSourceUserData, value: marker); result.append(event); return result
+    }
+    static func testPreciseRecording() throws {
+        let engine = ClassicEngine(); engine.state = "Recording"; engine.recordStart = ProcessInfo.processInfo.systemUptime
+        for i in 0..<5 {
+            guard let event = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: CGPoint(x: CGFloat(100 + i), y: 100), mouseButton: .left) else { throw MacroError.message("Could not create movement fixture") }
+            _ = engine.receive(.mouseMoved, event)
+        }
+        guard engine.recording.actions.count == 5, engine.recording.actions.last?.x == 104 else { throw MacroError.message("Fine movement was discarded") }
+        engine.state = "Ready"
     }
     func shutdown() { stop(); if let source = tapSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }; if let tap { CFMachPortInvalidate(tap) }; tap = nil; tapSource = nil }
 }

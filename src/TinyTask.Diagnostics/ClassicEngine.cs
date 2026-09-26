@@ -71,7 +71,7 @@ internal sealed class ClassicEngine : IDisposable
     private readonly Hook mouseCallback,keyboardCallback;
     private nint mouseHook,keyboardHook;
     private readonly Stopwatch recordClock=new(),playClock=new();
-    private double lastRecord,lastMove;
+    private double lastRecord;
     private CancellationTokenSource? playback;
     private readonly Dictionary<string,MacroAction> held=new();
     private bool disposed;
@@ -112,7 +112,7 @@ internal sealed class ClassicEngine : IDisposable
         ObjectDisposedException.ThrowIf(disposed,this);
         if(IsBusy)throw new InvalidOperationException("Stop the current task first.");
         target?.Validate();recordingTarget=target;
-        Recording=new(){Name="Macro "+DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss"),Coordinates=target==null?"screen":"client",TargetProcess=target?.Process};lastRecord=lastMove=0;
+        Recording=new(){Name="Macro "+DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss"),Coordinates=target==null?"screen":"client",TargetProcess=target?.Process};lastRecord=0;
         mouseHook=SetWindowsHookEx(14,mouseCallback,GetModuleHandle(null),0);
         keyboardHook=SetWindowsHookEx(13,keyboardCallback,GetModuleHandle(null),0);
         if(mouseHook==0 || keyboardHook==0){int error=Marshal.GetLastWin32Error();Unhook();throw new Win32Exception(error,"Recording hooks could not be installed.");}
@@ -122,8 +122,6 @@ internal sealed class ClassicEngine : IDisposable
     private void Append(MacroAction action)
     {
         double now=recordClock.Elapsed.TotalSeconds;
-        if(action.Type=="move" && now-lastMove<0.008)return;
-        if(action.Type=="move")lastMove=now;
         if(Recording.Actions.Count>=99700){System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(()=>{Stop();Failed?.Invoke("Recording stopped at the action limit. Save this macro before continuing.");});return;}
         action.Delay=Math.Max(0,now-lastRecord);lastRecord=now;Recording.Actions.Add(action);
     }
@@ -135,7 +133,7 @@ internal sealed class ClassicEngine : IDisposable
             {
                 var m=Marshal.PtrToStructure<MouseData>(data);
                 if(AcceptInjectedForTest)TestMousePackets.Add(new{message=(int)message,x=m.Point.X,y=m.Point.Y,m.Data,m.Flags,extra=m.Extra.ToString(),own=OwnWindow(Native.WindowFromPoint(m.Point))});
-                if((AcceptInjectedForTest ? m.Extra==Marker : (m.Flags&1)==0) && !OwnWindow(Native.WindowFromPoint(m.Point)))
+                if((AcceptInjectedForTest ? m.Extra==Marker : (m.Flags&1)==0) && ((int)message==0x200 || !OwnWindow(Native.WindowFromPoint(m.Point))))
                 {
                     if(recordingTarget!=null)
                     {

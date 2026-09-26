@@ -319,7 +319,12 @@ internal sealed class HomeWindow : Window
         Get<Button>("Record").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Get<Button>("Record").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         bool preserved=previous==macroJson&&Get<TextBlock>("Status").Text.StartsWith("No input captured");
-        engine.AcceptInjectedForTest=false;return saved&&replayed&&preserved;
+        Get<Button>("Record").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Native.GetWindowRect(hwnd,out var own);
+        for(int i=0;i<5;i++){int x=own.Left+20+i;await System.Threading.Tasks.Task.Run(()=>ClassicEngine.Send(new(){Type="move",X=x,Y=own.Top+20}));}
+        Get<Button>("Record").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        bool precise=MacroDocument.Parse(macroJson!).Actions.Count(a=>a.Type=="move")==5;
+        engine.AcceptInjectedForTest=false;return saved&&replayed&&preserved&&precise;
     }
     internal bool TestEmptyPlay()
     {

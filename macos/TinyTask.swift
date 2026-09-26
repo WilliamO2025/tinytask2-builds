@@ -207,6 +207,7 @@ final class TinyTaskApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if CommandLine.arguments.contains("--self-test") {
             do {
                 let original = MacroDocument(name: "Round trip", actions: [MacroAction(type: "mouseDown", delay: 0.25, x: 123, y: 456), MacroAction(type: "keyUp", key: 0)])
+                try ClassicEngine.testPreciseRecording()
                 try ClassicEngine().prepare(original, speed: 1)
                 var invalidStartRejected = false
                 do { try ClassicEngine().play(original, speed: 1, loops: 1, continuous: false, synchronizedStart: .infinity) } catch { invalidStartRejected = error.localizedDescription == "Invalid synchronized start time." }
