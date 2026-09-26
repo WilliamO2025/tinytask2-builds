@@ -1,5 +1,7 @@
 import AppKit
 
+private final class SessionStack: NSStackView { override var isFlipped: Bool { true } }
+
 final class MacSessionWindow: NSWindowController, NSWindowDelegate {
     private unowned let app: TinyTaskApp
     private let client = MacSessionConnection()
@@ -23,7 +25,7 @@ final class MacSessionWindow: NSWindowController, NSWindowDelegate {
         super.init(window: NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 640), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false))
         defaults.set(id, forKey: "sessionDeviceID"); window!.title = "TinyTask sessions"; window!.delegate = self; window!.center()
         let scroll = NSScrollView(); scroll.hasVerticalScroller = true; window!.contentView = scroll
-        let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10; stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
+        let stack = SessionStack(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10; stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         scroll.documentView = stack; stack.translatesAutoresizingMaskIntoConstraints = false
         stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
         func field(_ title: String, _ field: NSTextField, _ text: String) { stack.addArrangedSubview(NSTextField(labelWithString: title)); field.stringValue = text; field.widthAnchor.constraint(equalToConstant: 555).isActive = true; stack.addArrangedSubview(field) }
