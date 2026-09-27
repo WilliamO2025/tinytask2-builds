@@ -4,15 +4,15 @@ A compact Classic macro recorder for Windows and macOS, with a separate experime
 
 ## Downloads
 
-RC6 adds lossless compressed recordings, bounded native playback preparation, and an improved Mac permission flow. Recordings have no fixed time/action cap; available RAM and disk remain limits. Experimental sessions now support Windows and Mac using the same configured server; no public server is provided. Each computer runs its own local recording.
+RC7 adds a passive Mac recording-monitor fallback and copyable permission diagnostics. Windows downloads are unchanged from RC6. Lossless compressed recordings and bounded native playback preparation remain included. Recordings have no fixed time/action cap; available RAM and disk remain limits. Experimental sessions now support Windows and Mac using the same configured server; no public server is provided. Each computer runs its own local recording.
 
-[Download v0.2.0-rc6 from GitHub Releases](https://github.com/WilliamO2025/tinytask2-builds/releases/tag/v0.2.0-rc6).
+[Download v0.2.0-rc7 from GitHub Releases](https://github.com/WilliamO2025/tinytask2-builds/releases/tag/v0.2.0-rc7).
 
-- [Windows installer](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc6/TinyTask2-Windows.Setup.exe)
-- [Windows portable app](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc6/TinyTask2-Windows.exe)
-- [TinyTask 2.0 for macOS](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc6/TinyTask2-macOS.zip)
-- [Windows Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc6/TinyTask2-Windows-InputLab.exe)
-- [macOS Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc6/TinyTask2-macOS-InputLab.zip)
+- [Windows installer](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc7/TinyTask2-Windows.Setup.exe)
+- [Windows portable app](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc7/TinyTask2-Windows.exe)
+- [TinyTask 2.0 for macOS](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc7/TinyTask2-macOS.zip)
+- [Windows Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc7/TinyTask2-Windows-InputLab.exe)
+- [macOS Input Lab](https://github.com/WilliamO2025/tinytask2-builds/releases/download/v0.2.0-rc7/TinyTask2-macOS-InputLab.zip)
 
 Windows: run the installer for Start Menu and desktop shortcuts, or open the portable EXE. The runtime is included. Builds are unsigned and may trigger SmartScreen.
 
